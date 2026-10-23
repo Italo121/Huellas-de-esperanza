@@ -87,6 +87,75 @@
             display: inline-block;
             text-align: center;
         }
+
+        .catalog-tools {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 1rem;
+            padding: 1rem;
+        }
+
+        .animal-card {
+            height: 100%;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+            border-radius: 1rem;
+            background: #fff;
+            box-shadow: 0 .25rem 1rem rgba(33, 37, 41, .08);
+            transition: transform .2s ease, box-shadow .2s ease;
+        }
+
+        .animal-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 .5rem 1.5rem rgba(33, 37, 41, .14);
+        }
+
+        .animal-photo,
+        .photo-fallback {
+            width: 100%;
+            height: 220px;
+            object-fit: cover;
+        }
+
+        .photo-fallback {
+            display: grid;
+            place-items: center;
+            background: #e9f5ee;
+            color: #198754;
+            font-size: 3rem;
+        }
+
+        .species-badge {
+            color: #146c43;
+            background: #d1e7dd;
+        }
+
+        .animal-facts {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .65rem;
+            font-size: .875rem;
+        }
+
+        .animal-facts i {
+            color: #198754;
+        }
+
+        .animal-description {
+            display: -webkit-box;
+            overflow: hidden;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+        }
+
+        .empty-state {
+            padding: 2rem;
+            border: 1px dashed #adb5bd;
+            border-radius: 1rem;
+            background: #fff;
+            color: #6c757d;
+            text-align: center;
+        }
     </style>
 </head>
 
@@ -332,6 +401,98 @@
             <!-- ÁREA DE TRABAJO -->
             <div class="p-4 overflow-auto" style="height: calc(100vh - 73px);">
                 {% block content %}
+                <section id="animales" aria-labelledby="catalog-title">
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-2 mb-3">
+                        <div>
+                            <h2 class="h3 mb-1" id="catalog-title">Animales del refugio</h2>
+                            <p class="text-secondary mb-0" id="result-count">
+                                {{ animales|length }} animal{{ animales|length|pluralize:"es" }} registrado{{ animales|length|pluralize:"s" }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="catalog-tools mb-4">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-12 col-md-8">
+                                <label class="form-label small fw-semibold" for="animal-search">Buscar por nombre o raza</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-white border-end-0">
+                                        <i class="bi bi-search" aria-hidden="true"></i>
+                                    </span>
+                                    <input class="form-control border-start-0" id="animal-search" type="search"
+                                           placeholder="Ej. Luna, mestizo..." autocomplete="off">
+                                </div>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small fw-semibold" for="species-filter">Especie</label>
+                                <select class="form-select" id="species-filter">
+                                    <option value="">Todas las especies</option>
+                                    {% for especie in especies %}
+                                    <option value="{{ especie|lower }}">{{ especie|capfirst }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-4" id="animal-grid">
+                        {% for animal in animales %}
+                        <article class="col-12 col-sm-6 col-xl-4 animal-entry"
+                                 data-species="{{ animal.especie|lower }}"
+                                 data-search="{{ animal.nombre|default:''|lower }} {{ animal.raza.nomb_raza|lower }} {{ animal.especie|lower }}">
+                            <div class="animal-card">
+                                {% if animal.foto_url %}
+                                <img class="animal-photo" src="{{ animal.foto_url }}"
+                                     alt="{{ animal.nombre|default:animal.especie }}" loading="lazy">
+                                {% else %}
+                                <div class="photo-fallback" role="img" aria-label="Foto no disponible">
+                                    <i class="bi bi-heart-pulse" aria-hidden="true"></i>
+                                </div>
+                                {% endif %}
+                                <div class="p-3 p-lg-4">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="badge rounded-pill species-badge">{{ animal.especie|capfirst }}</span>
+                                        <span class="small text-secondary">#{{ animal.id_animal }}</span>
+                                    </div>
+                                    <h3 class="h5 mb-1">{{ animal.nombre|default:"Esperando nombre" }}</h3>
+                                    <p class="text-secondary mb-3">{{ animal.raza.nomb_raza }}</p>
+                                    <div class="animal-facts mb-3">
+                                        <span><i class="bi bi-hourglass-split me-1" aria-hidden="true"></i>{{ animal.edad_aprox }} años aprox.</span>
+                                        <span><i class="bi bi-gender-ambiguous me-1" aria-hidden="true"></i>{{ animal.sexo|capfirst }}</span>
+                                        <span><i class="bi bi-speedometer2 me-1" aria-hidden="true"></i>{{ animal.peso }} kg</span>
+                                        <span>
+                                            <i class="bi bi-cpu me-1" aria-hidden="true"></i>
+                                            {% if animal.microchip %}Con microchip{% else %}Sin microchip{% endif %}
+                                        </span>
+                                    </div>
+                                    {% if animal.descripcion %}
+                                    <p class="animal-description mb-3">{{ animal.descripcion }}</p>
+                                    {% endif %}
+                                    <div class="small text-secondary border-top pt-3 mb-3">
+                                        <i class="bi bi-geo-alt me-1" aria-hidden="true"></i>
+                                        Rescatado en {{ animal.lugar_rescate }}
+                                        <span class="d-block mt-1">
+                                            <i class="bi bi-heart-pulse me-1" aria-hidden="true"></i>
+                                            {{ animal.condicion|cut:"_"|capfirst }}
+                                        </span>
+                                    </div>
+                                    <button class="btn btn-outline-success w-100" type="button" disabled
+                                            aria-label="Ficha detallada de {{ animal.nombre|default:animal.especie }} próximamente">
+                                        Ver ficha detallada (próximamente)
+                                    </button>
+                                </div>
+                            </div>
+                        </article>
+                        {% empty %}
+                        <div class="col-12">
+                            <div class="empty-state">Aún no hay animales registrados. Cuando se agreguen, aparecerán aquí.</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="empty-state mt-3 d-none" id="no-results" role="status">
+                        No encontramos animales con esos criterios. Prueba con otra búsqueda.
+                    </div>
+                </section>
                 {% endblock %}
             </div>
 
@@ -339,6 +500,33 @@
     </div>
 </div>
 
+<script>
+    const animalSearch = document.getElementById("animal-search");
+    const speciesFilter = document.getElementById("species-filter");
+    const animalEntries = [...document.querySelectorAll(".animal-entry")];
+    const resultCount = document.getElementById("result-count");
+    const noResults = document.getElementById("no-results");
+
+    function filterAnimals() {
+        const search = animalSearch.value.trim().toLocaleLowerCase();
+        const species = speciesFilter.value;
+        let visibleCount = 0;
+
+        animalEntries.forEach((entry) => {
+            const matchesSearch = entry.dataset.search.includes(search);
+            const matchesSpecies = !species || entry.dataset.species === species;
+            const visible = matchesSearch && matchesSpecies;
+            entry.classList.toggle("d-none", !visible);
+            if (visible) visibleCount += 1;
+        });
+
+        resultCount.textContent = `${visibleCount} animal${visibleCount === 1 ? "" : "es"} encontrado${visibleCount === 1 ? "" : "s"}`;
+        noResults.classList.toggle("d-none", visibleCount !== 0);
+    }
+
+    animalSearch.addEventListener("input", filterAnimals);
+    speciesFilter.addEventListener("change", filterAnimals);
+</script>
+
 </body>
 </html>
-
