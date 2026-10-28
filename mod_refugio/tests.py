@@ -12,6 +12,375 @@ from django.test import RequestFactory, SimpleTestCase
 from httpx import ReadTimeout
 
 from . import views
+from .models import (
+    Animal,
+    EvaluacionAnimal,
+    Estado,
+    Personal,
+    Tratamiento,
+    Vacuna,
+    VacunaAnimal,
+    Veterinario,
+)
+
+
+class ModelosSaludAnimalTests(SimpleTestCase):
+    def test_health_models_map_to_existing_unmanaged_tables(self):
+        expected_tables = {
+            Veterinario: "veterinario",
+            EvaluacionAnimal: "evaluacion_animal",
+            Vacuna: "vacuna",
+            VacunaAnimal: "vacuna_animal",
+            Tratamiento: "tratamiento",
+        }
+
+        for model, table_name in expected_tables.items():
+            with self.subTest(model=model.__name__):
+                self.assertEqual(model._meta.db_table, table_name)
+                self.assertFalse(model._meta.managed)
+
+    def test_health_relationships_point_to_their_domain_models(self):
+        self.assertIs(
+            Veterinario._meta.get_field("rut_personal").remote_field.model,
+            Personal,
+        )
+        self.assertIs(
+            EvaluacionAnimal._meta.get_field("id_animal").remote_field.model,
+            Animal,
+        )
+        self.assertIs(
+            EvaluacionAnimal._meta.get_field("rut_personal").remote_field.model,
+            Veterinario,
+        )
+        self.assertIs(
+            VacunaAnimal._meta.get_field("id_vacuna").remote_field.model,
+            Vacuna,
+        )
+        self.assertIs(
+            Tratamiento._meta.get_field("id_estado").remote_field.model,
+            Estado,
+        )
+
+
+class GestionSaludAnimalTests(SimpleTestCase):
+    def test_non_personal_account_cannot_open_health_management(self):
+        request = RequestFactory().get("/refugio/salud-animal/")
+        request.session = {"refugio_usuario": {"id": "public-user"}}
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.select_related"
+            ) as personal_query,
+            patch("mod_refugio.views.render", return_value=HttpResponse("denied")) as render_mock,
+        ):
+            personal_query.return_value.get.side_effect = Personal.DoesNotExist
+            response = views.gestion_salud_animal(request)
+
+        self.assertEqual(render_mock.call_args.kwargs["status"], 403)
+
+    @patch("mod_refugio.views.redirect")
+    @patch("mod_refugio.views.messages.success")
+    @patch("mod_refugio.views.Tratamiento.objects")
+    @patch("mod_refugio.views.EvaluacionAnimal.objects")
+    @patch("mod_refugio.views.get_object_or_404")
+    @patch("mod_refugio.views.Animal.objects")
+    @patch("mod_refugio.views.Veterinario.objects.filter")
+    @patch("mod_refugio.views.Personal.objects.select_related")
+    def test_veterinarian_can_record_an_evaluation(
+        self,
+        personal_query,
+        veterinarian_filter,
+        animal_manager,
+        get_animal,
+        evaluation_manager,
+        treatment_manager,
+        success_message,
+        redirect_mock,
+    ):
+        personal = SimpleNamespace(pk="12345678-9", rol="veterinario")
+        veterinarian = SimpleNamespace(pk=personal.pk)
+        animal = SimpleNamespace(pk=4)
+        personal_query.return_value.get.return_value = personal
+        veterinarian_filter.return_value.first.return_value = veterinarian
+        animal_manager.select_related.return_value.order_by.return_value = []
+        get_animal.return_value = animal
+        evaluation_manager.select_related.return_value.filter.return_value.first.return_value = (
+            None
+        )
+        treatment_manager.select_related.return_value.filter.return_value = []
+        redirect_mock.return_value = HttpResponse(status=302)
+
+        request = RequestFactory().post(
+            "/refugio/salud-animal/?animal=4",
+            data={
+                "action": "evaluacion",
+                "animal_id": "4",
+                "fecha": "2026-10-28",
+                "estado_salud": "sano",
+                "necesita_tratamiento": "on",
+                "observacion": "Evaluación de control",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "veterinarian-user"}}
+
+        response = views.gestion_salud_animal(request)
+
+        self.assertEqual(response.status_code, 302)
+        evaluation_manager.create.assert_called_once_with(
+            fecha=date(2026, 10, 28),
+            estado_salud="sano",
+            necesita_tratamiento=True,
+            observacion="Evaluación de control",
+            id_animal=animal,
+            rut_personal=veterinarian,
+        )
+        success_message.assert_called_once()
+
+    def test_evaluation_form_rejects_states_not_allowed_by_database(self):
+        form = views.EvaluacionAnimalForm(
+            data={
+                "fecha": "2026-10-28",
+                "estado_salud": "estable",
+                "necesita_tratamiento": "",
+                "observacion": "Control",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("estado_salud", form.errors)
+
+    def test_evaluation_form_exposes_database_health_states(self):
+        form = views.EvaluacionAnimalForm()
+
+        self.assertEqual(
+            form.fields["estado_salud"].choices,
+            [
+                ("sano", "Sano"),
+                ("en_tratamiento", "En tratamiento"),
+                ("grave", "Grave"),
+            ],
+        )
+
+    @patch("mod_refugio.views.render", return_value=HttpResponse("health"))
+    @patch("mod_refugio.views.Tratamiento.objects")
+    @patch("mod_refugio.views.EvaluacionAnimal.objects")
+    @patch("mod_refugio.views.get_object_or_404")
+    @patch("mod_refugio.views.Animal.objects")
+    @patch("mod_refugio.views.Veterinario.objects.filter")
+    @patch("mod_refugio.views.Personal.objects.select_related")
+    def test_treatment_requires_latest_evaluation_to_recommend_it(
+        self,
+        personal_query,
+        veterinarian_filter,
+        animal_manager,
+        get_animal,
+        evaluation_manager,
+        treatment_manager,
+        render_mock,
+    ):
+        personal = SimpleNamespace(pk="12345678-9", rol="veterinario")
+        veterinarian_filter.return_value.first.return_value = SimpleNamespace(
+            pk=personal.pk
+        )
+        personal_query.return_value.get.return_value = personal
+        animal_manager.select_related.return_value.order_by.return_value = []
+        get_animal.return_value = SimpleNamespace(pk=4)
+        evaluation_manager.select_related.return_value.filter.return_value.first.return_value = (
+            SimpleNamespace(necesita_tratamiento=False)
+        )
+        treatment_manager.select_related.return_value.filter.return_value = []
+        request = RequestFactory().post(
+            "/refugio/salud-animal/?animal=4",
+            data={"action": "tratamiento", "animal_id": "4"},
+        )
+        request.session = {"refugio_usuario": {"id": "veterinarian-user"}}
+
+        response = views.gestion_salud_animal(request)
+
+        self.assertEqual(render_mock.call_args.kwargs["status"], 400)
+        context = render_mock.call_args.args[2]
+        self.assertIn("evaluación más reciente", context["error"])
+        treatment_manager.create.assert_not_called()
+        self.assertFalse(context["puede_registrar_tratamiento"])
+
+    @patch("mod_refugio.views.redirect")
+    @patch("mod_refugio.views.messages.success")
+    @patch("mod_refugio.views.TratamientoAnimalForm")
+    @patch("mod_refugio.views.Tratamiento.objects")
+    @patch("mod_refugio.views.EvaluacionAnimal.objects")
+    @patch("mod_refugio.views.get_object_or_404")
+    @patch("mod_refugio.views.Animal.objects")
+    @patch("mod_refugio.views.Veterinario.objects.filter")
+    @patch("mod_refugio.views.Personal.objects.select_related")
+    def test_veterinarian_can_record_treatment_after_recommended_evaluation(
+        self,
+        personal_query,
+        veterinarian_filter,
+        animal_manager,
+        get_animal,
+        evaluation_manager,
+        treatment_manager,
+        treatment_form_class,
+        success_message,
+        redirect_mock,
+    ):
+        personal = SimpleNamespace(pk="12345678-9", rol="veterinario")
+        veterinarian = SimpleNamespace(pk=personal.pk)
+        animal = SimpleNamespace(pk=4)
+        state = SimpleNamespace(pk=8)
+        personal_query.return_value.get.return_value = personal
+        veterinarian_filter.return_value.first.return_value = veterinarian
+        animal_manager.select_related.return_value.order_by.return_value = []
+        get_animal.return_value = animal
+        evaluation_manager.select_related.return_value.filter.return_value.first.return_value = (
+            SimpleNamespace(necesita_tratamiento=True)
+        )
+        treatment_manager.select_related.return_value.filter.return_value = []
+        form = treatment_form_class.return_value
+        form.is_valid.return_value = True
+        form.cleaned_data = {
+            "fecha_inicio": date(2026, 10, 28),
+            "fecha_termino": None,
+            "tipo_tratamiento": "control",
+            "detalle": "Limpieza diaria",
+            "observacion": "",
+            "diagnostico": "Herida superficial",
+            "costo": 15000,
+            "id_estado": state,
+        }
+        redirect_mock.return_value = HttpResponse(status=302)
+        request = RequestFactory().post(
+            "/refugio/salud-animal/?animal=4",
+            data={"action": "tratamiento", "animal_id": "4"},
+        )
+        request.session = {"refugio_usuario": {"id": "veterinarian-user"}}
+
+        response = views.gestion_salud_animal(request)
+
+        self.assertEqual(response.status_code, 302)
+        treatment_manager.create.assert_called_once_with(
+            fecha_inicio=date(2026, 10, 28),
+            fecha_termino=None,
+            tipo_tratamiento="control",
+            detalle="Limpieza diaria",
+            observacion=None,
+            diagnostico="Herida superficial",
+            costo=15000,
+            id_estado=state,
+            rut_personal=veterinarian,
+            id_animal=animal,
+        )
+        success_message.assert_called_once()
+
+    def test_treatment_form_rejects_types_not_allowed_by_database(self):
+        form = views.TratamientoAnimalForm(
+            data={
+                "fecha_inicio": "2026-10-28",
+                "fecha_termino": "",
+                "tipo_tratamiento": "test",
+                "detalle": "Detalle",
+                "observacion": "",
+                "diagnostico": "Diagnóstico",
+                "costo": "25000",
+                "id_estado": "",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("tipo_tratamiento", form.errors)
+
+    def test_treatment_form_exposes_database_types(self):
+        form = views.TratamientoAnimalForm()
+
+        self.assertEqual(
+            form.fields["tipo_tratamiento"].choices,
+            [
+                ("vacuna", "Vacuna"),
+                ("cirugia", "Cirugía"),
+                ("control", "Control"),
+                ("desparasitacion", "Desparasitación"),
+                ("otro", "Otro"),
+            ],
+        )
+
+
+class GestionVacunasTests(SimpleTestCase):
+    @patch("mod_refugio.views.redirect")
+    @patch("mod_refugio.views.messages.success")
+    @patch("mod_refugio.views.VacunaAnimal.objects")
+    @patch("mod_refugio.views.VacunaAnimalForm")
+    @patch("mod_refugio.views.get_object_or_404")
+    @patch("mod_refugio.views.Animal.objects")
+    @patch("mod_refugio.views.Veterinario.objects.filter")
+    @patch("mod_refugio.views.Personal.objects.get")
+    def test_veterinarian_can_register_vaccine_for_animal(
+        self,
+        personal_get,
+        veterinarian_filter,
+        animal_manager,
+        get_animal,
+        form_class,
+        vaccine_manager,
+        success_message,
+        redirect_mock,
+    ):
+        personal = SimpleNamespace(pk="12345678-9", rol="veterinario")
+        veterinarian_filter.return_value.first.return_value = SimpleNamespace(
+            pk=personal.pk
+        )
+        vaccine = SimpleNamespace(pk=2)
+        animal = SimpleNamespace(pk=4)
+        personal_get.return_value = personal
+        animal_manager.select_related.return_value.order_by.return_value = []
+        get_animal.return_value = animal
+        vaccine_manager.select_related.return_value.filter.return_value = []
+        form = form_class.return_value
+        form.is_valid.return_value = True
+        form.cleaned_data = {
+            "id_vacuna": vaccine,
+            "fecha_aplicacion": date(2026, 10, 28),
+            "fecha_prox_dosis": None,
+            "aplicada": True,
+            "observacion": "Aplicada sin reacción.",
+        }
+        redirect_mock.return_value = HttpResponse(status=302)
+        request = RequestFactory().post(
+            "/refugio/vacunas/?animal=4",
+            data={"animal_id": "4"},
+        )
+        request.session = {"refugio_usuario": {"id": "veterinarian-user"}}
+
+        response = views.gestion_vacunas(request)
+
+        self.assertEqual(response.status_code, 302)
+        vaccine_manager.create.assert_called_once_with(
+            fecha_aplicacion=date(2026, 10, 28),
+            fecha_prox_dosis=None,
+            aplicada=True,
+            observacion="Aplicada sin reacción.",
+            id_animal=animal,
+            id_vacuna=vaccine,
+        )
+        success_message.assert_called_once()
+
+    def test_vaccine_form_allows_no_next_dose(self):
+        form = views.VacunaAnimalForm()
+
+        self.assertFalse(form.fields["fecha_prox_dosis"].required)
+
+    def test_vaccine_form_rejects_next_dose_before_application(self):
+        form = views.VacunaAnimalForm(
+            data={
+                "id_vacuna": "",
+                "fecha_aplicacion": "2026-10-28",
+                "fecha_prox_dosis": "2026-10-27",
+                "aplicada": "on",
+                "observacion": "Control",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("fecha_prox_dosis", form.errors)
 
 
 class RegistroUsuarioTests(SimpleTestCase):
@@ -421,8 +790,10 @@ class FichaAnimalTests(SimpleTestCase):
     @patch("mod_refugio.views.Estado.objects")
     @patch("mod_refugio.views.get_object_or_404")
     @patch("mod_refugio.views.Personal.objects.filter")
+    @patch("mod_refugio.views.VacunaAnimal.objects.select_related")
     def test_detail_view_loads_animal_state_and_rescue_without_writing(
         self,
+        vaccine_query,
         personal_filter,
         get_animal,
         state_manager,
@@ -443,6 +814,8 @@ class FichaAnimalTests(SimpleTestCase):
         rescue_manager.select_related.return_value.filter.return_value.first.return_value = (
             None
         )
+        vaccines = [SimpleNamespace(id_vacuna=SimpleNamespace(nomb_vacuna="Antirrábica"))]
+        vaccine_query.return_value.filter.return_value = vaccines
 
         request = RequestFactory().get("/refugio/animales/7/")
         request.session = {}
@@ -454,6 +827,7 @@ class FichaAnimalTests(SimpleTestCase):
         self.assertEqual(context["animal"], animal)
         self.assertEqual(context["estado_animal"].nombre, "Disponible")
         self.assertIsNone(context["rescate"])
+        self.assertEqual(context["vacunas_animal"], vaccines)
         self.assertFalse(context["puede_editar"])
         get_animal.assert_called_once()
         self.assertEqual(get_animal.call_args.kwargs, {"pk": 7})

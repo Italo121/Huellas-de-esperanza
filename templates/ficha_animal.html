@@ -142,6 +142,66 @@
             </dl>
         </section>
 
+        <section class="mb-4" aria-labelledby="vaccine-info-title">
+            <h2 class="h5 fw-bold border-bottom pb-2 mb-3" id="vaccine-info-title">
+                <i class="bi bi-capsule-pill text-success me-2" aria-hidden="true"></i>
+                Vacunas
+            </h2>
+            {% if vacunas_animal %}
+            <div class="table-responsive">
+                <table class="table table-striped align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th scope="col">Vacuna</th>
+                            <th scope="col">Fecha de aplicación</th>
+                            <th scope="col">Próxima dosis</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for registro in vacunas_animal %}
+                        <tr>
+                            <th scope="row">
+                                {{ registro.id_vacuna.nomb_vacuna }}
+                                {% if registro.id_vacuna.descripcion %}
+                                <span class="d-block small text-secondary fw-normal">
+                                    {{ registro.id_vacuna.descripcion }}
+                                </span>
+                                {% endif %}
+                            </th>
+                            <td>
+                                {% if registro.aplicada %}
+                                {{ registro.fecha_aplicacion|date:"d/m/Y" }}
+                                {% else %}
+                                Programada para {{ registro.fecha_aplicacion|date:"d/m/Y" }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if registro.fecha_prox_dosis %}
+                                {{ registro.fecha_prox_dosis|date:"d/m/Y" }}
+                                {% else %}
+                                No requiere refuerzo programado
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if registro.aplicada %}
+                                <span class="badge text-bg-success">Aplicada</span>
+                                {% else %}
+                                <span class="badge text-bg-warning">Pendiente</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ registro.observacion }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">No hay vacunas registradas para este animal.</p>
+            {% endif %}
+        </section>
+
         <section class="mb-4" aria-labelledby="rescue-info-title">
             <h2 class="h5 fw-bold border-bottom pb-2 mb-3" id="rescue-info-title">
                 <i class="bi bi-geo-alt text-success me-2" aria-hidden="true"></i>

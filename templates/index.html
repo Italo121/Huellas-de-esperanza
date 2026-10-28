@@ -308,11 +308,13 @@
             <!-- Estadísticas y reportes -->
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">
-                    Estadísticas y reportes
+                    Gestion y reportes
                 </small>
             </div>
 
             <ul class="nav flex-column p-3 pt-2">
+                {% if request.session.refugio_usuario.rol %}
+
                 <li class="nav-item">
                     <a href="#" class="nav-link text-white">
                         <i class="bi bi-people-fill me-2"></i>
@@ -326,12 +328,17 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
+                    <a href="{% url 'gestion_salud_animal' %}" class="nav-link text-white">
                         <i class="bi bi-capsule me-2"></i>
-                        Tratamientos realizados
+                        Tratamientos
                     </a>
                 </li>
-                {% if request.session.refugio_usuario.rol %}
+                <li class="nav-item">
+                    <a href="{% url 'gestion_vacunas' %}" class="nav-link text-white">
+                        <i class="bi bi-capsule-pill me-2" aria-hidden="true"></i>
+                        Vacunas
+                    </a>
+                </li>
                 <li class="nav-item">
                     <a href="{% url 'registro_animal' %}" class="nav-link text-white">
                         <i class="bi bi-plus-circle-fill me-2"></i>

@@ -11,8 +11,25 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from .forms import EditarAnimalForm, RegistroAnimalForm, RegistroUsuarioForm
-from .models import Animal, Estado, Personal, Rescate, Usuario
+from .forms import (
+    EditarAnimalForm,
+    EvaluacionAnimalForm,
+    RegistroAnimalForm,
+    RegistroUsuarioForm,
+    TratamientoAnimalForm,
+    VacunaAnimalForm,
+)
+from .models import (
+    Animal,
+    EvaluacionAnimal,
+    Estado,
+    Personal,
+    Rescate,
+    Tratamiento,
+    Usuario,
+    Veterinario,
+    VacunaAnimal,
+)
 from .supabase_client import supabase, supabase_storage
 
 logger = logging.getLogger(__name__)
@@ -56,6 +73,10 @@ def ficha_animal(request, animal_id):
         .filter(pk=animal.id_rescate)
         .first()
     )
+    vacunas_animal = (
+        VacunaAnimal.objects.select_related("id_vacuna")
+        .filter(id_animal=animal)
+    )
     personal_nombre = None
     if rescate and rescate.rut_personal.id_usuario:
         usuario = rescate.rut_personal.id_usuario
@@ -85,9 +106,340 @@ def ficha_animal(request, animal_id):
             "animal": animal,
             "estado_animal": estado_animal,
             "rescate": rescate,
+            "vacunas_animal": vacunas_animal,
             "personal_nombre": personal_nombre,
             "puede_editar": puede_editar,
         },
+    )
+
+
+def gestion_salud_animal(request):
+    if request.method not in {"GET", "POST"}:
+        return render(
+            request,
+            "salud_animales.html",
+            {"error": "Método no permitido."},
+            status=405,
+        )
+
+    session_user = request.session.get("refugio_usuario")
+    if not session_user:
+        messages.info(request, "Inicia sesión con una cuenta del personal para continuar.")
+        return redirect("login_usuario")
+
+    supabase_uid = session_user.get("id")
+    if not supabase_uid:
+        return render(
+            request,
+            "salud_animales.html",
+            {"error": "No pudimos verificar tu cuenta. Vuelve a iniciar sesión."},
+            status=403,
+        )
+
+    try:
+        personal = Personal.objects.select_related("id_usuario").get(
+            id_usuario__supabase_uid=supabase_uid
+        )
+    except Personal.DoesNotExist:
+        return render(
+            request,
+            "salud_animales.html",
+            {"error": "Esta sección está disponible para el personal del refugio."},
+            status=403,
+        )
+
+    veterinario = None
+    if personal.rol == "veterinario":
+        veterinario = Veterinario.objects.filter(
+            rut_personal_id=personal.pk
+        ).first()
+
+    animales = Animal.objects.select_related("raza").order_by("nombre", "id_animal")
+    animal_id = (
+        request.POST.get("animal_id")
+        if request.method == "POST"
+        else request.GET.get("animal")
+    )
+    animal = None
+    if animal_id:
+        animal = get_object_or_404(animales, pk=animal_id)
+
+    evaluaciones = EvaluacionAnimal.objects.none()
+    tratamientos = Tratamiento.objects.none()
+    ultima_evaluacion = None
+    if animal:
+        evaluaciones = (
+            EvaluacionAnimal.objects.select_related(
+                "rut_personal__rut_personal__id_usuario"
+            )
+            .filter(id_animal=animal)
+        )
+        ultima_evaluacion = evaluaciones.first()
+        tratamientos = (
+            Tratamiento.objects.select_related(
+                "id_estado",
+                "rut_personal__rut_personal__id_usuario",
+            )
+            .filter(id_animal=animal)
+        )
+
+    puede_registrar = veterinario is not None
+    puede_registrar_tratamiento = bool(
+        puede_registrar
+        and ultima_evaluacion
+        and ultima_evaluacion.necesita_tratamiento
+    )
+    evaluation_form = EvaluacionAnimalForm()
+    treatment_form = TratamientoAnimalForm()
+    error = None
+
+    if request.method == "POST":
+        if not puede_registrar:
+            return render(
+                request,
+                "salud_animales.html",
+                {
+                    "error": (
+                        "Solo un veterinario registrado puede añadir "
+                        "evaluaciones o tratamientos."
+                    ),
+                    "animales": animales,
+                    "animal": animal,
+                },
+                status=403,
+            )
+        if not animal:
+            return render(
+                request,
+                "salud_animales.html",
+                {
+                    "error": "Selecciona un animal antes de registrar información.",
+                    "animales": animales,
+                },
+                status=400,
+            )
+
+        action = request.POST.get("action")
+        if action == "evaluacion":
+            evaluation_form = EvaluacionAnimalForm(request.POST)
+            if evaluation_form.is_valid():
+                datos = evaluation_form.cleaned_data
+                try:
+                    EvaluacionAnimal.objects.create(
+                        fecha=datos["fecha"],
+                        estado_salud=datos["estado_salud"],
+                        necesita_tratamiento=datos["necesita_tratamiento"],
+                        observacion=datos["observacion"],
+                        id_animal=animal,
+                        rut_personal=veterinario,
+                    )
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to save health evaluation for animal %s by veterinarian %s",
+                        animal.pk,
+                        personal.pk,
+                    )
+                    error = "No pudimos guardar la evaluación. Inténtalo nuevamente."
+                else:
+                    messages.success(request, "La evaluación se registró correctamente.")
+                    return redirect(f"{request.path}?animal={animal.pk}")
+        elif action == "tratamiento":
+            treatment_form = TratamientoAnimalForm(request.POST)
+            if not puede_registrar_tratamiento:
+                error = (
+                    "Para registrar un tratamiento, la evaluación más reciente "
+                    "debe indicar que el animal lo necesita."
+                )
+            elif treatment_form.is_valid():
+                datos = treatment_form.cleaned_data
+                try:
+                    Tratamiento.objects.create(
+                        fecha_inicio=datos["fecha_inicio"],
+                        fecha_termino=datos["fecha_termino"],
+                        tipo_tratamiento=datos["tipo_tratamiento"],
+                        detalle=datos["detalle"],
+                        observacion=datos["observacion"] or None,
+                        diagnostico=datos["diagnostico"],
+                        costo=datos["costo"],
+                        id_estado=datos["id_estado"],
+                        rut_personal=veterinario,
+                        id_animal=animal,
+                    )
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to save treatment for animal %s by veterinarian %s",
+                        animal.pk,
+                        personal.pk,
+                    )
+                    error = "No pudimos guardar el tratamiento. Inténtalo nuevamente."
+                else:
+                    messages.success(request, "El tratamiento se registró correctamente.")
+                    return redirect(f"{request.path}?animal={animal.pk}")
+        else:
+            error = "Selecciona una acción válida."
+
+    status = 200
+    if request.method == "POST" and (
+        error
+        or (
+            request.POST.get("action") == "evaluacion"
+            and not evaluation_form.is_valid()
+        )
+        or (
+            request.POST.get("action") == "tratamiento"
+            and not treatment_form.is_valid()
+        )
+    ):
+        status = 400
+
+    return render(
+        request,
+        "salud_animales.html",
+        {
+            "animales": animales,
+            "animal": animal,
+            "evaluaciones": evaluaciones,
+            "tratamientos": tratamientos,
+            "ultima_evaluacion": ultima_evaluacion,
+            "puede_registrar": puede_registrar,
+            "puede_registrar_tratamiento": puede_registrar_tratamiento,
+            "evaluation_form": evaluation_form,
+            "treatment_form": treatment_form,
+            "error": error,
+            "veterinario_sin_perfil": personal.rol == "veterinario" and not veterinario,
+        },
+        status=status,
+    )
+
+
+def gestion_vacunas(request):
+    if request.method not in {"GET", "POST"}:
+        return render(
+            request,
+            "vacunas_animales.html",
+            {"error": "Método no permitido."},
+            status=405,
+        )
+
+    session_user = request.session.get("refugio_usuario")
+    if not session_user:
+        messages.info(request, "Inicia sesión con una cuenta del personal para continuar.")
+        return redirect("login_usuario")
+
+    supabase_uid = session_user.get("id")
+    if not supabase_uid:
+        return render(
+            request,
+            "vacunas_animales.html",
+            {"error": "No pudimos verificar tu cuenta. Vuelve a iniciar sesión."},
+            status=403,
+        )
+
+    try:
+        personal = Personal.objects.get(id_usuario__supabase_uid=supabase_uid)
+    except Personal.DoesNotExist:
+        return render(
+            request,
+            "vacunas_animales.html",
+            {"error": "Esta sección está disponible para el personal del refugio."},
+            status=403,
+        )
+
+    veterinario = None
+    if personal.rol == "veterinario":
+        veterinario = Veterinario.objects.filter(
+            rut_personal_id=personal.pk
+        ).first()
+
+    animales = Animal.objects.select_related("raza").order_by("nombre", "id_animal")
+    animal_id = (
+        request.POST.get("animal_id")
+        if request.method == "POST"
+        else request.GET.get("animal")
+    )
+    animal = None
+    if animal_id:
+        animal = get_object_or_404(animales, pk=animal_id)
+
+    vacunas_animal = VacunaAnimal.objects.none()
+    if animal:
+        vacunas_animal = (
+            VacunaAnimal.objects.select_related(
+                "id_vacuna",
+                "id_animal",
+            )
+            .filter(id_animal=animal)
+        )
+
+    puede_registrar = veterinario is not None
+    vacuna_form = VacunaAnimalForm()
+    error = None
+
+    if request.method == "POST":
+        if not puede_registrar:
+            return render(
+                request,
+                "vacunas_animales.html",
+                {
+                    "error": (
+                        "Solo un veterinario registrado puede añadir "
+                        "vacunas al historial."
+                    ),
+                    "animales": animales,
+                    "animal": animal,
+                },
+                status=403,
+            )
+        if not animal:
+            return render(
+                request,
+                "vacunas_animales.html",
+                {
+                    "error": "Selecciona un animal antes de registrar una vacuna.",
+                    "animales": animales,
+                },
+                status=400,
+            )
+
+        vacuna_form = VacunaAnimalForm(request.POST)
+        if vacuna_form.is_valid():
+            datos = vacuna_form.cleaned_data
+            try:
+                VacunaAnimal.objects.create(
+                    fecha_aplicacion=datos["fecha_aplicacion"],
+                    fecha_prox_dosis=datos["fecha_prox_dosis"],
+                    aplicada=datos["aplicada"],
+                    observacion=datos["observacion"],
+                    id_animal=animal,
+                    id_vacuna=datos["id_vacuna"],
+                )
+            except DatabaseError:
+                logger.exception(
+                    "Unable to save vaccine record for animal %s by veterinarian %s",
+                    animal.pk,
+                    personal.pk,
+                )
+                error = "No pudimos guardar la vacuna. Revisa los datos e inténtalo nuevamente."
+            else:
+                messages.success(request, "La vacuna se registró correctamente.")
+                return redirect(f"{request.path}?animal={animal.pk}")
+
+    status = 400 if request.method == "POST" and (
+        error or not vacuna_form.is_valid()
+    ) else 200
+    return render(
+        request,
+        "vacunas_animales.html",
+        {
+            "animales": animales,
+            "animal": animal,
+            "vacunas_animal": vacunas_animal,
+            "puede_registrar": puede_registrar,
+            "vacuna_form": vacuna_form,
+            "error": error,
+            "veterinario_sin_perfil": personal.rol == "veterinario" and not veterinario,
+        },
+        status=status,
     )
 
 

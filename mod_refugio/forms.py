@@ -3,7 +3,15 @@ from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.utils import timezone
 
-from .models import Animal, Estado, Raza, Rescate
+from .models import (
+    Animal,
+    Estado,
+    EvaluacionAnimal,
+    Raza,
+    Rescate,
+    Tratamiento,
+    Vacuna,
+)
 
 MAX_ANIMAL_IMAGE_SIZE = 5 * 1024 * 1024
 ALLOWED_ANIMAL_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
@@ -305,3 +313,143 @@ class EditarAnimalForm(forms.ModelForm):
         if commit:
             animal.save()
         return animal
+
+
+class EvaluacionAnimalForm(forms.Form):
+    fecha = forms.DateField(
+        label="Fecha de evaluación",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    estado_salud = forms.ChoiceField(
+        choices=EvaluacionAnimal._meta.get_field("estado_salud").choices,
+        label="Estado de salud",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    necesita_tratamiento = forms.BooleanField(
+        label="¿Necesita tratamiento?",
+        required=False,
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    observacion = forms.CharField(
+        label="Observaciones",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["fecha"].initial = timezone.localdate()
+
+
+class TratamientoAnimalForm(forms.Form):
+    fecha_inicio = forms.DateField(
+        label="Fecha de inicio",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    fecha_termino = forms.DateField(
+        label="Fecha de término",
+        required=False,
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    tipo_tratamiento = forms.ChoiceField(
+        choices=Tratamiento._meta.get_field("tipo_tratamiento").choices,
+        label="Tipo de tratamiento",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    detalle = forms.CharField(
+        label="Detalle",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+    )
+    observacion = forms.CharField(
+        label="Observaciones",
+        required=False,
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 2}),
+    )
+    diagnostico = forms.CharField(
+        label="Diagnóstico",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+    costo = forms.IntegerField(
+        min_value=0,
+        label="Costo",
+        widget=forms.NumberInput(
+            attrs={"class": "form-control", "min": "0", "step": "1"}
+        ),
+    )
+    id_estado = forms.ModelChoiceField(
+        queryset=Estado.objects.filter(tipo_estado="Tratamiento").order_by("nombre"),
+        label="Estado del tratamiento",
+        empty_label="Selecciona un estado",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["fecha_inicio"].initial = timezone.localdate()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        fecha_inicio = cleaned_data.get("fecha_inicio")
+        fecha_termino = cleaned_data.get("fecha_termino")
+        if fecha_inicio and fecha_termino and fecha_termino < fecha_inicio:
+            self.add_error(
+                "fecha_termino",
+                "La fecha de término no puede ser anterior a la fecha de inicio.",
+            )
+        return cleaned_data
+
+
+class VacunaAnimalForm(forms.Form):
+    id_vacuna = forms.ModelChoiceField(
+        queryset=Vacuna.objects.order_by("nomb_vacuna"),
+        label="Vacuna",
+        empty_label="Selecciona una vacuna",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    fecha_aplicacion = forms.DateField(
+        label="Fecha de aplicación",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    fecha_prox_dosis = forms.DateField(
+        label="Fecha de próxima dosis",
+        required=False,
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    aplicada = forms.BooleanField(
+        label="La vacuna ya fue aplicada",
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    observacion = forms.CharField(
+        label="Observaciones",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["fecha_aplicacion"].initial = timezone.localdate()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        fecha_aplicacion = cleaned_data.get("fecha_aplicacion")
+        fecha_prox_dosis = cleaned_data.get("fecha_prox_dosis")
+        if (
+            fecha_aplicacion
+            and fecha_prox_dosis
+            and fecha_prox_dosis < fecha_aplicacion
+        ):
+            self.add_error(
+                "fecha_prox_dosis",
+                "La próxima dosis no puede ser anterior a la fecha de aplicación.",
+            )
+        return cleaned_data

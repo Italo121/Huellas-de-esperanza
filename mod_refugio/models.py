@@ -158,3 +158,143 @@ class Animal(models.Model):
     class Meta:
         managed = False
         db_table = "animal"
+
+
+class Veterinario(models.Model):
+    rut_personal = models.OneToOneField(
+        Personal,
+        on_delete=models.DO_NOTHING,
+        db_column="rut_personal",
+        primary_key=True,
+        related_name="datos_veterinario",
+    )
+    especialidad = models.TextField()
+    experiencia = models.SmallIntegerField()
+
+    class Meta:
+        managed = False
+        db_table = "veterinario"
+
+    def __str__(self):
+        return f"Veterinario {self.rut_personal_id}"
+
+
+class EvaluacionAnimal(models.Model):
+    ESTADOS_SALUD = [
+        ("sano", "Sano"),
+        ("en_tratamiento", "En tratamiento"),
+        ("grave", "Grave"),
+    ]
+
+    id_evaluacion = models.BigAutoField(primary_key=True)
+    fecha = models.DateField()
+    estado_salud = models.TextField(choices=ESTADOS_SALUD)
+    necesita_tratamiento = models.BooleanField()
+    observacion = models.TextField()
+    id_animal = models.ForeignKey(
+        Animal,
+        on_delete=models.DO_NOTHING,
+        db_column="id_animal",
+        related_name="evaluaciones_salud",
+    )
+    rut_personal = models.ForeignKey(
+        Veterinario,
+        on_delete=models.DO_NOTHING,
+        db_column="rut_personal",
+        related_name="evaluaciones",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "evaluacion_animal"
+        ordering = ("-fecha", "-id_evaluacion")
+
+    def __str__(self):
+        return f"Evaluación de {self.id_animal} ({self.fecha})"
+
+
+class Vacuna(models.Model):
+    id_vacuna = models.BigAutoField(primary_key=True)
+    nomb_vacuna = models.TextField()
+    descripcion = models.TextField()
+
+    class Meta:
+        managed = False
+        db_table = "vacuna"
+        ordering = ("nomb_vacuna",)
+
+    def __str__(self):
+        return self.nomb_vacuna
+
+
+class VacunaAnimal(models.Model):
+    id_vacuna_animal = models.BigAutoField(primary_key=True)
+    fecha_aplicacion = models.DateField()
+    fecha_prox_dosis = models.DateField(null=True, blank=True)
+    aplicada = models.BooleanField()
+    observacion = models.TextField()
+    id_animal = models.ForeignKey(
+        Animal,
+        on_delete=models.DO_NOTHING,
+        db_column="id_animal",
+        related_name="vacunaciones",
+    )
+    id_vacuna = models.ForeignKey(
+        Vacuna,
+        on_delete=models.DO_NOTHING,
+        db_column="id_vacuna",
+        related_name="aplicaciones",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "vacuna_animal"
+        ordering = ("-fecha_aplicacion", "-id_vacuna_animal")
+
+    def __str__(self):
+        return f"{self.id_vacuna} - {self.id_animal}"
+
+
+class Tratamiento(models.Model):
+    TIPOS_TRATAMIENTO = [
+        ("vacuna", "Vacuna"),
+        ("cirugia", "Cirugía"),
+        ("control", "Control"),
+        ("desparasitacion", "Desparasitación"),
+        ("otro", "Otro"),
+    ]
+
+    id_tratamiento = models.BigAutoField(primary_key=True)
+    fecha_inicio = models.DateField()
+    fecha_termino = models.DateField(null=True, blank=True)
+    tipo_tratamiento = models.TextField(choices=TIPOS_TRATAMIENTO)
+    detalle = models.TextField()
+    observacion = models.TextField(null=True, blank=True)
+    diagnostico = models.TextField()
+    costo = models.IntegerField()
+    id_estado = models.ForeignKey(
+        Estado,
+        on_delete=models.DO_NOTHING,
+        db_column="id_estado",
+        related_name="tratamientos",
+    )
+    rut_personal = models.ForeignKey(
+        Veterinario,
+        on_delete=models.DO_NOTHING,
+        db_column="rut_personal",
+        related_name="tratamientos",
+    )
+    id_animal = models.ForeignKey(
+        Animal,
+        on_delete=models.DO_NOTHING,
+        db_column="id_animal",
+        related_name="tratamientos",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "tratamiento"
+        ordering = ("-fecha_inicio", "-id_tratamiento")
+
+    def __str__(self):
+        return f"{self.tipo_tratamiento} - {self.id_animal}"
