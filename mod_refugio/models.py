@@ -15,55 +15,41 @@ class Refugio(models.Model):
         db_table = "refugio"
 
 
-class Personal(models.Model):
-    rut_personal = models.CharField(max_length=10, primary_key=True)
-    rol = models.CharField(
-        max_length=50,
-        choices=[
-            ("cuidador", "Cuidador"),
-            ("administrativo", "Administrativo"),
-            ("coordinador", "Coordinador"),
-            ("veterinario", "Veterinario"),
-        ],
-    )
-    fecha_ingreso = models.DateField()
-    fecha_salida = models.DateField(null=True, blank=True)
-    telefono_emergencia = models.IntegerField()
-    direccion = models.CharField(max_length=100)
-
-    class Meta:
-        managed = False
-        db_table = "personal"
-
-
 class Usuario(models.Model):
     id_usuario = models.BigAutoField(primary_key=True)
     p_nombre = models.CharField(max_length=50)
     s_nombre = models.CharField(max_length=50)
     ap_paterno = models.CharField(max_length=50)
     ap_materno = models.CharField(max_length=50)
-    contrasena_hash = models.CharField(max_length=128)
-    correo = models.CharField(max_length=50, null=True, blank=True)
-    personal = models.ForeignKey(
-        Personal,
-        on_delete=models.DO_NOTHING,
-        db_column="rut_personal",
-        null=True,
-        blank=True,
-        related_name="usuarios",
-    )
+    correo = models.EmailField(max_length=50, unique=True, null=True)
     genero = models.CharField(max_length=50)
     fecha_nacimiento = models.DateField()
-    telefono = models.DecimalField(
-        max_digits=1000,
-        decimal_places=0,
-        null=True,
-        blank=True,
-    )
+    telefono = models.DecimalField(max_digits=20, decimal_places=0, null=True)
+    supabase_uid = models.UUIDField(unique=True, null=True, editable=False)
 
     class Meta:
-        managed = False
-        db_table = "usuario"
+        db_table = 'usuario'
+
+class Personal(models.Model):
+    ROLES = [
+        ('cuidador', 'Cuidador'),
+        ('administrativo', 'Administrativo'),
+        ('coordinador', 'Coordinador'),
+        ('veterinario', 'Veterinario'),
+    ]
+    rut_personal = models.CharField(max_length=10, primary_key=True)
+    rol = models.CharField(max_length=50, choices=ROLES)
+    fecha_ingreso = models.DateField()
+    fecha_salida = models.DateField(null=True, blank=True)
+    telefono_emergencia = models.IntegerField()
+    direccion = models.CharField(max_length=100)
+    id_usuario = models.OneToOneField(
+        Usuario, 
+        on_delete=models.CASCADE, 
+        db_column='id_usuario', 
+        null=True)
+    class Meta:
+        db_table = 'personal'
 
 
 class Raza(models.Model):

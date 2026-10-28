@@ -370,29 +370,39 @@
                                 data-bs-toggle="dropdown"
                                 aria-expanded="false">
                             <i class="bi bi-person-circle me-1"></i>
-                            Administrador
+                            {{ request.session.refugio_usuario.nombre|default:"Mi cuenta" }}
                         </button>
 
                         <ul class="dropdown-menu dropdown-menu-end">
+                            {% if request.session.refugio_usuario %}
                             <li>
-                                <a class="dropdown-item" href="#">
-                                    <i class="bi bi-person me-2"></i>
-                                    Mi perfil
+                                <span class="dropdown-item-text small text-secondary">
+                                    {{ request.session.refugio_usuario.correo }}
+                                </span>
+                            </li>
+                            <li>
+                                <form method="post" action="{% url 'logout_usuario' %}">
+                                    {% csrf_token %}
+                                    <button class="dropdown-item text-danger" type="submit">
+                                        <i class="bi bi-box-arrow-right me-2"></i>
+                                        Cerrar sesión
+                                    </button>
+                                </form>
+                            </li>
+                            {% else %}
+                            <li>
+                                <a class="dropdown-item" href="{% url 'login_usuario' %}">
+                                    <i class="bi bi-box-arrow-in-right me-2"></i>
+                                    Iniciar sesión
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="#">
-                                    <i class="bi bi-gear me-2"></i>
-                                    Configuración
+                                <a class="dropdown-item" href="{% url 'registro_usuario' %}">
+                                    <i class="bi bi-person-plus me-2"></i>
+                                    Crear cuenta
                                 </a>
                             </li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li>
-                                <a class="dropdown-item text-danger" href="#">
-                                    <i class="bi bi-box-arrow-right me-2"></i>
-                                    Cerrar sesión
-                                </a>
-                            </li>
+                            {% endif %}
                         </ul>
                     </div>
                 </div>
@@ -400,6 +410,9 @@
 
             <!-- ÁREA DE TRABAJO -->
             <div class="p-4 overflow-auto" style="height: calc(100vh - 73px);">
+                {% for message in messages %}
+                <div class="alert alert-success" role="status">{{ message }}</div>
+                {% endfor %}
                 {% block content %}
                 <section id="animales" aria-labelledby="catalog-title">
                     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-2 mb-3">
