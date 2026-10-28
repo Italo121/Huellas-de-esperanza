@@ -321,6 +321,14 @@
                         Tratamientos realizados
                     </a>
                 </li>
+                {% if request.session.refugio_usuario.rol %}
+                <li class="nav-item">
+                    <a href="{% url 'registro_animal' %}" class="nav-link text-white">
+                        <i class="bi bi-plus-circle-fill me-2"></i>
+                        Registrar un Animal
+                    </a>
+                </li>
+                {% endif %}
             </ul>
 
             <!-- Foro -->
@@ -489,10 +497,10 @@
                                             {{ animal.condicion|cut:"_"|capfirst }}
                                         </span>
                                     </div>
-                                    <button class="btn btn-outline-success w-100" type="button" disabled
-                                            aria-label="Ficha detallada de {{ animal.nombre|default:animal.especie }} próximamente">
-                                        Ver ficha detallada (próximamente)
-                                    </button>
+                                    <a class="btn btn-outline-success w-100"
+                                       href="{% url 'ficha_animal' animal.id_animal %}">
+                                        Ver ficha detallada
+                                    </a>
                                 </div>
                             </div>
                         </article>

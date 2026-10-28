@@ -1,5 +1,17 @@
 from django.db import models
 
+class Estado(models.Model):
+    id_estado = models.BigAutoField(primary_key=True)
+    tipo_estado = models.CharField(max_length=50)
+    nombre = models.CharField(max_length=50)
+
+    class Meta:
+        managed = False
+        db_table = "estado"
+
+    def __str__(self):
+        return f"{self.tipo_estado} - {self.nombre}"
+
 
 class Refugio(models.Model):
     id_refugio = models.BigAutoField(primary_key=True)
@@ -44,12 +56,46 @@ class Personal(models.Model):
     telefono_emergencia = models.IntegerField()
     direccion = models.CharField(max_length=100)
     id_usuario = models.OneToOneField(
-        Usuario, 
-        on_delete=models.CASCADE, 
-        db_column='id_usuario', 
+        Usuario,
+        on_delete=models.CASCADE,
+        db_column='id_usuario',
         null=True)
+    id_estado = models.OneToOneField(
+        Estado,
+        on_delete=models.CASCADE,
+        db_column='id_estado',
+        null=True,
+    )
     class Meta:
         db_table = 'personal'
+
+class Rescate(models.Model):
+    CONDICIONES = [
+        ("sano", "Sano"),
+        ("en_tratamiento", "En tratamiento"),
+        ("grave", "Grave"),
+    ]
+
+    id_rescate = models.BigAutoField(primary_key=True)
+    fecha_rescate = models.DateField()
+    lugar_rescate = models.CharField(max_length=100)
+    descripcion = models.CharField(max_length=100)
+    condicion_inicial = models.CharField(max_length=50, choices=CONDICIONES)
+    observacion = models.CharField(max_length=50, null=True, blank=True)
+    id_estado = models.ForeignKey(
+        Estado,
+        on_delete=models.DO_NOTHING,
+        db_column="id_estado",
+    )
+    rut_personal = models.ForeignKey(
+        Personal,
+        on_delete=models.DO_NOTHING,
+        db_column="rut_personal",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "rescate"
 
 
 class Raza(models.Model):
@@ -59,6 +105,9 @@ class Raza(models.Model):
     class Meta:
         managed = False
         db_table = "raza"
+
+    def __str__(self):
+        return self.nomb_raza
 
 
 class Animal(models.Model):

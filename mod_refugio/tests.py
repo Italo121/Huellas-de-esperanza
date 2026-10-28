@@ -1,7 +1,13 @@
+from io import BytesIO
 from datetime import date
+from contextlib import nullcontext
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.exceptions import ValidationError
+from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase
 from httpx import ReadTimeout
 
@@ -211,3 +217,307 @@ class LoginUsuarioTests(SimpleTestCase):
             request.session["supabase_access_token"],
             "access-token",
         )
+
+
+class RegistroAnimalTests(SimpleTestCase):
+    def setUp(self):
+        atomic_patch = patch(
+            "mod_refugio.views.transaction.atomic",
+            return_value=nullcontext(),
+        )
+        atomic_patch.start()
+        self.addCleanup(atomic_patch.stop)
+
+    def test_form_context_exposes_rescue_fields_used_by_template(self):
+        context = views._registro_animal_context(
+            views.RegistroAnimalForm()
+        )
+
+        self.assertIn("rescue_fields", context)
+        self.assertEqual(
+            [field.name for field in context["rescue_fields"]],
+            [
+                "fecha_rescate",
+                "descripcion_rescate",
+                "condicion_inicial",
+                "observacion_rescate",
+                "estado_rescate",
+            ],
+        )
+
+    def test_state_selectors_are_filtered_by_entity_type(self):
+        animal_query_params = (
+            views.RegistroAnimalForm.base_fields["estado_animal"]
+            .queryset.query.sql_with_params()[1]
+        )
+        rescue_query_params = (
+            views.RegistroAnimalForm.base_fields["estado_rescate"]
+            .queryset.query.sql_with_params()[1]
+        )
+
+        self.assertIn("Animal", animal_query_params)
+        self.assertNotIn("Rescate", animal_query_params)
+        self.assertIn("Rescate", rescue_query_params)
+        self.assertNotIn("Animal", rescue_query_params)
+
+    def test_image_field_accepts_jpeg_png_and_webp_only(self):
+        image_field = views.RegistroAnimalForm.base_fields["foto"]
+        valid_png = self._png_upload("animal.png")
+        cleaned_image = image_field.clean(valid_png)
+        self.assertEqual(cleaned_image.image.format, "PNG")
+
+        invalid_file = SimpleUploadedFile(
+            "animal.txt",
+            b"not an image",
+            content_type="text/plain",
+        )
+        with self.assertRaises(ValidationError):
+            image_field.clean(invalid_file)
+
+    @staticmethod
+    def _png_upload(name):
+        from PIL import Image
+
+        image_bytes = BytesIO()
+        Image.new("RGB", (1, 1), color="green").save(image_bytes, format="PNG")
+        return SimpleUploadedFile(
+            name,
+            image_bytes.getvalue(),
+            content_type="image/png",
+        )
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        request = RequestFactory().get("/refugio/animales/registrar/")
+        request.session = {}
+
+        with patch("mod_refugio.views.messages.info"):
+            response = views.registro_animal(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/refugio/login/")
+
+    @patch("mod_refugio.views.Personal.objects.get")
+    def test_general_user_is_not_allowed_to_register_animals(self, personal_get):
+        request = RequestFactory().get("/refugio/animales/registrar/")
+        request.session = {
+            "refugio_usuario": {"id": "user-uuid", "rol": None}
+        }
+        personal_get.side_effect = views.Personal.DoesNotExist
+
+        response = views.registro_animal(request)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b"integrantes del personal", response.content.lower())
+
+    @patch("mod_refugio.views.messages.success")
+    @patch("mod_refugio.views.Animal.objects.create")
+    @patch("mod_refugio.views.Rescate.objects.create")
+    @patch("mod_refugio.views.RegistroAnimalForm")
+    @patch("mod_refugio.views.Personal.objects.get")
+    @patch("mod_refugio.views.supabase_storage")
+    def test_personal_creates_rescue_and_animal_together(
+        self,
+        storage_mock,
+        personal_get,
+        form_class,
+        rescue_create,
+        animal_create,
+        success_message,
+    ):
+        personal = SimpleNamespace(rut_personal="12345678-9")
+        rescue_state = SimpleNamespace(pk=11)
+        animal_state = SimpleNamespace(pk=12)
+        breed = SimpleNamespace(pk=13)
+        rescue = SimpleNamespace(pk=14)
+        personal_get.return_value = personal
+        form = form_class.return_value
+        form.is_valid.return_value = True
+        form.cleaned_data = {
+            "nombre": "Luna",
+            "edad_aprox": 2,
+            "sexo": "hembra",
+            "peso": 12.5,
+            "descripcion": "Rescatada en la ciudad.",
+            "lugar_rescate": "Santiago",
+            "condicion": "sano",
+            "especie": "perro",
+            "microchip": True,
+            "foto": SimpleNamespace(
+                image=SimpleNamespace(format="PNG"),
+                content_type="image/png",
+                file=BytesIO(b"png"),
+                seek=MagicMock(),
+                read=MagicMock(return_value=b"png"),
+            ),
+            "fecha_ingreso": date(2026, 10, 28),
+            "comportamiento": "Amigable",
+            "raza": breed,
+            "estado_animal": animal_state,
+            "fecha_rescate": date(2026, 10, 27),
+            "descripcion_rescate": "Encontrada en la calle.",
+            "condicion_inicial": "en_tratamiento",
+            "observacion_rescate": "",
+            "estado_rescate": rescue_state,
+        }
+        rescue_create.return_value = rescue
+        bucket = storage_mock.storage.from_.return_value
+        bucket.get_public_url.return_value = (
+            "https://project.supabase.co/storage/v1/object/public/"
+            "animales/user-uuid/image.png"
+        )
+        request = RequestFactory().post(
+            "/refugio/animales/registrar/",
+            data={},
+        )
+        request.session = {
+            "refugio_usuario": {"id": "user-uuid", "rol": "cuidador"}
+        }
+
+        response = views.registro_animal(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/refugio/")
+        bucket.upload.assert_called_once()
+        image_path = bucket.upload.call_args.args[0]
+        self.assertRegex(image_path, r"^user-uuid/[0-9a-f]{32}\.png$")
+        self.assertEqual(
+            bucket.upload.call_args.args[2],
+            {"content-type": "image/png", "upsert": "false"},
+        )
+        self.assertEqual(bucket.upload.call_args.args[1], b"png")
+        rescue_create.assert_called_once_with(
+            fecha_rescate=date(2026, 10, 27),
+            lugar_rescate="Santiago",
+            descripcion="Encontrada en la calle.",
+            condicion_inicial="en_tratamiento",
+            observacion=None,
+            id_estado=rescue_state,
+            rut_personal=personal,
+        )
+        animal_create.assert_called_once_with(
+            nombre="Luna",
+            edad_aprox=2,
+            sexo="hembra",
+            peso=12.5,
+            descripcion="Rescatada en la ciudad.",
+            lugar_rescate="Santiago",
+            condicion="sano",
+            especie="perro",
+            microchip=True,
+            foto_url=bucket.get_public_url.return_value,
+            fecha_ingreso=date(2026, 10, 28),
+            fecha_salida=None,
+            comportamiento="Amigable",
+            raza=breed,
+            id_rescate=14,
+            id_estado=12,
+        )
+        success_message.assert_called_once()
+
+
+class FichaAnimalTests(SimpleTestCase):
+    @patch("mod_refugio.views.render", return_value=HttpResponse("detail"))
+    @patch("mod_refugio.views.Rescate.objects")
+    @patch("mod_refugio.views.Estado.objects")
+    @patch("mod_refugio.views.get_object_or_404")
+    @patch("mod_refugio.views.Personal.objects.filter")
+    def test_detail_view_loads_animal_state_and_rescue_without_writing(
+        self,
+        personal_filter,
+        get_animal,
+        state_manager,
+        rescue_manager,
+        render_mock,
+    ):
+        animal = SimpleNamespace(
+            id_animal=7,
+            id_estado=3,
+            id_rescate=12,
+            raza=SimpleNamespace(nomb_raza="Mestizo"),
+        )
+        get_animal.return_value = animal
+        state_manager.filter.return_value.first.return_value = SimpleNamespace(
+            nombre="Disponible"
+        )
+        personal_filter.return_value.exists.return_value = False
+        rescue_manager.select_related.return_value.filter.return_value.first.return_value = (
+            None
+        )
+
+        request = RequestFactory().get("/refugio/animales/7/")
+        request.session = {}
+        response = views.ficha_animal(request, animal_id=7)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(render_mock.call_args.args[1], "ficha_animal.html")
+        context = render_mock.call_args.args[2]
+        self.assertEqual(context["animal"], animal)
+        self.assertEqual(context["estado_animal"].nombre, "Disponible")
+        self.assertIsNone(context["rescate"])
+        self.assertFalse(context["puede_editar"])
+        get_animal.assert_called_once()
+        self.assertEqual(get_animal.call_args.kwargs, {"pk": 7})
+        rescue_manager.create.assert_not_called()
+
+
+class EditarAnimalTests(SimpleTestCase):
+    def test_general_user_cannot_access_animal_edit_form(self):
+        request = RequestFactory().get("/refugio/animales/7/editar/")
+        request.session = {
+            "refugio_usuario": {"id": "general-user", "rol": None}
+        }
+
+        with patch(
+            "mod_refugio.views.Personal.objects.get",
+            side_effect=views.Personal.DoesNotExist,
+        ):
+            response = views.editar_animal(request, animal_id=7)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b"integrantes del personal", response.content.lower())
+
+    @patch("mod_refugio.views.messages.info")
+    def test_anonymous_user_is_redirected_to_login(self, _message):
+        request = RequestFactory().get("/refugio/animales/7/editar/")
+        request.session = {}
+
+        response = views.editar_animal(request, animal_id=7)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/refugio/login/")
+
+    @patch("mod_refugio.views.messages.success")
+    @patch("mod_refugio.views.transaction.atomic", return_value=nullcontext())
+    @patch("mod_refugio.views.EditarAnimalForm")
+    @patch("mod_refugio.views.get_object_or_404")
+    @patch("mod_refugio.views.Personal.objects.get")
+    def test_personal_can_update_animal_without_changing_rescue(
+        self,
+        personal_get,
+        get_animal,
+        form_class,
+        _atomic,
+        success_message,
+    ):
+        animal = SimpleNamespace(pk=7, foto_url="existing-photo", save=MagicMock())
+        personal_get.return_value = SimpleNamespace(rut_personal="12345678-9")
+        get_animal.return_value = animal
+        form = form_class.return_value
+        form.is_valid.return_value = True
+        form.cleaned_data = {"foto": None}
+        form.save.return_value = animal
+        request = RequestFactory().post(
+            "/refugio/animales/7/editar/",
+            data={},
+        )
+        request.session = {
+            "refugio_usuario": {"id": "staff-user", "rol": "cuidador"}
+        }
+
+        response = views.editar_animal(request, animal_id=7)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/refugio/animales/7/")
+        animal.save.assert_called_once()
+        self.assertEqual(animal.foto_url, "existing-photo")
+        success_message.assert_called_once()
