@@ -1,9 +1,12 @@
 
 from django.urls import path
+from django.views.generic import RedirectView
 from . import views
 
 urlpatterns = [
     path("", views.inicio, name="inicio_refugio"),
+    path("informacion/", views.informacion_refugio, name="informacion_refugio"),
+    path("refugio/",views.informacion_refugio,name="informacion_refugio_alias",),
     path("salud-animal/", views.gestion_salud_animal, name="gestion_salud_animal"),
     path("vacunas/", views.gestion_vacunas, name="gestion_vacunas"),
     path("animales/<int:animal_id>/editar/", views.editar_animal, name="editar_animal"),

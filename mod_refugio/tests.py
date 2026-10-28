@@ -1,6 +1,7 @@
 from io import BytesIO
 from datetime import date
 from contextlib import nullcontext
+from decimal import Decimal
 import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -9,6 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase
+from django.urls import resolve, reverse
 from httpx import ReadTimeout
 
 from . import views
@@ -17,11 +19,74 @@ from .models import (
     EvaluacionAnimal,
     Estado,
     Personal,
+    Refugio,
     Tratamiento,
     Vacuna,
     VacunaAnimal,
     Veterinario,
 )
+
+
+class InformacionRefugioTests(SimpleTestCase):
+    def test_previous_refuge_url_redirects_to_information_page(self):
+        response = resolve("/refugio/refugio/").func(
+            RequestFactory().get("/refugio/refugio/")
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            reverse("informacion_refugio"),
+        )
+
+    @patch("mod_refugio.views.render", return_value=HttpResponse("shelter"))
+    @patch("mod_refugio.views.Refugio.objects.order_by")
+    def test_shelter_page_uses_refuge_details_and_coordinates(
+        self,
+        order_by,
+        render_mock,
+    ):
+        refuge = SimpleNamespace(
+            id_refugio=1,
+            nombre="Refugio Esperanza",
+            direccion="Calle 123",
+            telefono=987654321,
+            correo="contacto@example.cl",
+            latitud=Decimal("-36.820000"),
+            longitud=Decimal("-73.040000"),
+        )
+        order_by.return_value.first.return_value = refuge
+
+        response = views.informacion_refugio(
+            RequestFactory().get("/refugio/informacion/")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        order_by.assert_called_once_with("id_refugio")
+        context = render_mock.call_args.args[2]
+        self.assertIs(context["refugio"], refuge)
+        self.assertTrue(context["coordenadas_validas"])
+        self.assertIn("mlat=-36.820000", context["external_map_url"])
+        self.assertIn("mlon=-73.040000", context["external_map_url"])
+
+    @patch("mod_refugio.views.render", return_value=HttpResponse("empty"))
+    @patch("mod_refugio.views.Refugio.objects.order_by")
+    def test_shelter_page_shows_empty_state_when_no_refuge_exists(
+        self,
+        order_by,
+        render_mock,
+    ):
+        order_by.return_value.first.return_value = None
+
+        response = views.informacion_refugio(
+            RequestFactory().get("/refugio/informacion/")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        context = render_mock.call_args.args[2]
+        self.assertIsNone(context["refugio"])
+        self.assertFalse(context["coordenadas_validas"])
+        self.assertIsNone(context["external_map_url"])
 
 
 class ModelosSaludAnimalTests(SimpleTestCase):

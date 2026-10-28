@@ -1,5 +1,7 @@
 import json
 import logging
+from decimal import Decimal
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from httpx import ReadTimeout
@@ -25,6 +27,7 @@ from .models import (
     Estado,
     Personal,
     Rescate,
+    Refugio,
     Tratamiento,
     Usuario,
     Veterinario,
@@ -51,6 +54,31 @@ def inicio(request):
         {
             "animales": animales,
             "especies": especies,
+        },
+    )
+
+
+def informacion_refugio(request):
+    refugio = Refugio.objects.order_by("id_refugio").first()
+    coordenadas_validas = False
+    external_map_url = None
+    if refugio and refugio.latitud is not None and refugio.longitud is not None:
+        latitud = refugio.latitud
+        longitud = refugio.longitud
+        if Decimal("-90") <= latitud <= Decimal("90") and Decimal("-180") <= longitud <= Decimal("180"):
+            coordenadas_validas = True
+            external_map_url = (
+                "https://www.openstreetmap.org/?"
+                + urlencode({"mlat": str(latitud), "mlon": str(longitud)})
+            )
+
+    return render(
+        request,
+        "informacion_refugio.html",
+        {
+            "refugio": refugio,
+            "coordenadas_validas": coordenadas_validas,
+            "external_map_url": external_map_url,
         },
     )
 
