@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Solicitudes | Huellas de esperanza</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          rel="stylesheet">
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #e9f5ee 0%, #f8f9fa 55%, #d1e7dd 100%);
+        }
+
+        .requests-page {
+            width: min(100%, 1120px);
+        }
+
+        .request-card {
+            background-color: #f1f3f5;
+            border: 1px solid #e5e7eb;
+            border-radius: 1rem;
+            box-shadow: 0 .5rem 1.5rem rgba(33, 37, 41, .08);
+        }
+
+        .request-entry {
+            background-color: #e9ecef;
+            border-color: #d6d9dc !important;
+        }
+
+        .request-filter {
+            background-color: #e9ecef !important;
+        }
+    </style>
+</head>
+<body class="p-3 py-md-5">
+    <main class="requests-page mx-auto">
+        {% include "_account_nav.html" %}
+        <header class="mb-4">
+            <a class="link-success text-decoration-none small"
+               href="{% url 'inicio_refugio' %}">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
+                Volver al refugio
+            </a>
+            <h1 class="h2 fw-bold mt-3 mb-1">Gestión de solicitudes</h1>
+            <p class="text-secondary mb-0">
+                Revisa y responde las solicitudes recibidas por el refugio.
+            </p>
+        </header>
+
+        {% for message in messages %}
+        <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}"
+             role="status">{{ message }}</div>
+        {% endfor %}
+
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <nav class="request-card p-3 mb-4"
+             aria-label="Tipos de solicitudes">
+            <p class="fw-semibold mb-2">Ir a tipo de solicitud</p>
+            <div class="nav nav-pills flex-wrap gap-2">
+                <a class="nav-link active" href="#voluntariado">
+                    <i class="bi bi-person-hearts me-1" aria-hidden="true"></i>
+                    Voluntariado
+                </a>
+                <a class="nav-link" href="#adopcion">
+                    <i class="bi bi-house-heart me-1" aria-hidden="true"></i>
+                    Adopción
+                    <span class="badge text-bg-secondary ms-1">Próximamente</span>
+                </a>
+                <a class="nav-link" href="#hogar-temporal">
+                    <i class="bi bi-house-door me-1" aria-hidden="true"></i>
+                    Hogar temporal
+                    <span class="badge text-bg-secondary ms-1">Próximamente</span>
+                </a>
+            </div>
+        </nav>
+
+        <section id="voluntariado" class="request-card p-3 p-md-4 mb-4"
+                 aria-labelledby="volunteer-heading">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-person-hearts"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="volunteer-heading">
+                        Solicitudes de voluntariado
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Administra el estado y la respuesta a cada postulación.
+                    </p>
+                </div>
+            </div>
+
+            <form method="get" action="{% url 'gestion_solicitudes' %}"
+                  class="request-filter border rounded-3 p-3 mb-4">
+                <h3 class="h6 fw-bold mb-3">
+                    <i class="bi bi-calendar-range me-1" aria-hidden="true"></i>
+                    Filtrar por fecha de solicitud
+                </h3>
+                <div class="row g-3 align-items-end">
+                    {% for field in filtro_fecha_form %}
+                    <div class="col-12 col-sm-6 col-lg-4">
+                        <label class="form-label" for="{{ field.id_for_label }}">
+                            {{ field.label }}
+                        </label>
+                        {{ field }}
+                        {% if field.errors %}
+                        <div class="small text-danger mt-1">
+                            {{ field.errors|join:", " }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="col-12 col-lg-auto">
+                        <button class="btn btn-success me-1" type="submit">
+                            <i class="bi bi-funnel me-1" aria-hidden="true"></i>
+                            Filtrar
+                        </button>
+                        <a class="btn btn-outline-secondary"
+                           href="{% url 'gestion_solicitudes' %}">
+                            Limpiar
+                        </a>
+                    </div>
+                </div>
+                <p class="small text-secondary mb-0 mt-2">
+                    Completa solo “Desde” para ver desde esa fecha en adelante,
+                    solo “Hasta” para ver hasta esa fecha, o ambas para un periodo.
+                </p>
+            </form>
+
+            {% if solicitudes_voluntariado %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_voluntariado %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_usuario.p_nombre }}
+                                {{ solicitud.id_usuario.s_nombre }}
+                                {{ solicitud.id_usuario.ap_paterno }}
+                                {{ solicitud.id_usuario.ap_materno }}
+                            </h3>
+                            <span class="text-secondary">{{ solicitud.id_usuario.correo }}</span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge text-bg-success">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_solicitud|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_respuesta %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_respuesta|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivación</dt>
+                        <dd class="col-md-9">{{ solicitud.motivacion|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Disponibilidad</dt>
+                        <dd class="col-md-9">{{ solicitud.disponibilidad|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Experiencia</dt>
+                        <dd class="col-md-9">{{ solicitud.experiencia|linebreaksbr }}</dd>
+                    </dl>
+
+                    {% if solicitud.ya_es_personal %}
+                    <div class="alert alert-secondary mb-0" role="status">
+                        Esta persona ya forma parte del personal. La solicitud está
+                        bloqueada y no puede modificarse ni volver a incorporarse.
+                    </div>
+                    {% else %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="solicitud_id"
+                               value="{{ solicitud.id_solicitud_vol }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ filtro_fecha_form.fecha_desde.value|default:'' }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ filtro_fecha_form.fecha_hasta.value|default:'' }}">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-5">
+                                <label class="form-label fw-semibold"
+                                       for="estado-{{ solicitud.id_solicitud_vol }}">
+                                    Estado de la solicitud
+                                </label>
+                                <select class="form-select"
+                                        id="estado-{{ solicitud.id_solicitud_vol }}"
+                                        name="id_estado" required>
+                                    {% for estado in solicitud_form.fields.id_estado.queryset %}
+                                    <option value="{{ estado.pk }}"
+                                            {% if estado.pk == solicitud.id_estado_id %}selected{% endif %}>
+                                        {{ estado.nombre }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-7">
+                                <label class="form-label fw-semibold"
+                                       for="observacion-{{ solicitud.id_solicitud_vol }}">
+                                    Observación para la persona solicitante
+                                </label>
+                                <textarea class="form-control"
+                                          id="observacion-{{ solicitud.id_solicitud_vol }}"
+                                          name="observacion" rows="2">{{ solicitud.observacion|default_if_none:"" }}</textarea>
+                            </div>
+                            <div class="col-12 text-md-end">
+                                <button class="btn btn-success" type="submit">
+                                    <i class="bi bi-save me-1" aria-hidden="true"></i>
+                                    Guardar estado y respuesta
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    {% if es_admin and solicitud.id_estado.nombre == "Aprobada" %}
+                    <form method="post" class="border-top mt-3 pt-3"
+                          action="{% url 'gestion_solicitudes' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="incorporar_personal">
+                        <input type="hidden" name="solicitud_id"
+                               value="{{ solicitud.id_solicitud_vol }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ filtro_fecha_form.fecha_desde.value|default:'' }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ filtro_fecha_form.fecha_hasta.value|default:'' }}">
+                        <h4 class="h6 fw-bold mb-1">Incorporar a personal</h4>
+                        <p class="small text-secondary mb-3">
+                            Completa los datos restantes. La fecha de ingreso y el estado
+                            “Activo” se asignarán automáticamente.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="rut-personal-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.rut_personal.label }}
+                                </label>
+                                <input class="form-control" type="text" name="rut_personal"
+                                       id="rut-personal-{{ solicitud.id_solicitud_vol }}"
+                                       maxlength="10" required
+                                       value="{{ personal_form.rut_personal.value|default:'' }}">
+                                {% if personal_form.rut_personal.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.rut_personal.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="rol-personal-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.rol.label }}
+                                </label>
+                                <select class="form-select" name="rol"
+                                        id="rol-personal-{{ solicitud.id_solicitud_vol }}"
+                                        required>
+                                    <option value="">Selecciona un rol</option>
+                                    {% for value, label in personal_form.fields.rol.choices %}
+                                    <option value="{{ value }}"
+                                            {% if personal_form.rol.value == value %}selected{% endif %}>
+                                        {{ label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                {% if personal_form.rol.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.rol.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="telefono-emergencia-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.telefono_emergencia.label }}
+                                </label>
+                                <input class="form-control" type="number"
+                                       name="telefono_emergencia"
+                                       id="telefono-emergencia-{{ solicitud.id_solicitud_vol }}"
+                                       min="0" required
+                                       value="{{ personal_form.telefono_emergencia.value|default:'' }}">
+                                {% if personal_form.telefono_emergencia.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.telefono_emergencia.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="direccion-personal-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.direccion.label }}
+                                </label>
+                                <textarea class="form-control" name="direccion"
+                                          id="direccion-personal-{{ solicitud.id_solicitud_vol }}"
+                                          rows="2" required>{{ personal_form.direccion.value|default:'' }}</textarea>
+                                {% if personal_form.direccion.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.direccion.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-12 text-md-end">
+                                <button class="btn btn-primary" type="submit">
+                                    <i class="bi bi-person-check me-1" aria-hidden="true"></i>
+                                    Crear perfil de personal
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                Aún no se han recibido solicitudes de voluntariado.
+            </p>
+            {% endif %}
+        </section>
+
+        <section id="adopcion" class="request-card p-3 p-md-4 mb-4"
+                 aria-labelledby="adoption-heading">
+            <h2 class="h5 fw-bold mb-2" id="adoption-heading">
+                <i class="bi bi-house-heart text-success me-2" aria-hidden="true"></i>
+                Solicitudes de adopción
+            </h2>
+            <p class="text-secondary mb-0">
+                La gestión de solicitudes de adopción estará disponible cuando se implemente
+                su flujo y tabla correspondiente.
+            </p>
+        </section>
+
+        <section id="hogar-temporal" class="request-card p-3 p-md-4"
+                 aria-labelledby="foster-heading">
+            <h2 class="h5 fw-bold mb-2" id="foster-heading">
+                <i class="bi bi-house-door text-success me-2" aria-hidden="true"></i>
+                Solicitudes de hogar temporal
+            </h2>
+            <p class="text-secondary mb-0">
+                La gestión de solicitudes de hogar temporal estará disponible cuando se
+                implemente su flujo y tabla correspondiente.
+            </p>
+        </section>
+    </main>
+</body>
+</html>

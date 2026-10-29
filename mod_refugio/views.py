@@ -6,18 +6,25 @@ from uuid import uuid4
 
 from httpx import ReadTimeout
 from django.db import DatabaseError, transaction
+from django.db.models import Exists, OuterRef
 from django.http import JsonResponse
+from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .forms import (
+    AltaPersonalDesdeSolicitudForm,
     EditarAnimalForm,
     EvaluacionAnimalForm,
+    FiltroFechaSolicitudForm,
+    GestionSolicitudVoluntariadoForm,
     RegistroAnimalForm,
     RegistroUsuarioForm,
+    SolicitudVoluntariadoForm,
     TratamientoAnimalForm,
     VacunaAnimalForm,
 )
@@ -28,6 +35,7 @@ from .models import (
     Personal,
     Rescate,
     Refugio,
+    SolicitudVoluntariado,
     Tratamiento,
     Usuario,
     Veterinario,
@@ -48,12 +56,21 @@ def inicio(request):
         .values_list("especie", flat=True)
         .distinct()
     )
+    session_user = request.session.get("refugio_usuario", {})
+    supabase_uid = session_user.get("id") if session_user else None
+    es_personal = bool(
+        supabase_uid
+        and Personal.objects.filter(
+            id_usuario__supabase_uid=supabase_uid
+        ).exists()
+    )
     return render(
         request,
         "index.html",
         {
             "animales": animales,
             "especies": especies,
+            "es_personal": es_personal,
         },
     )
 
@@ -81,6 +98,340 @@ def informacion_refugio(request):
             "external_map_url": external_map_url,
         },
     )
+
+
+def solicitar_voluntariado(request):
+    if request.method not in {"GET", "POST"}:
+        response = render(
+            request,
+            "solicitud_voluntariado.html",
+            {"error": "Método no permitido."},
+            status=405,
+        )
+        response["Allow"] = "GET, POST"
+        return response
+
+    session_user = request.session.get("refugio_usuario")
+    if not session_user:
+        messages.info(
+            request,
+            "Inicia sesión con tu cuenta para enviar una solicitud de voluntariado.",
+        )
+        return redirect_to_login(
+            request.get_full_path(),
+            login_url=resolve_url("login_usuario"),
+        )
+
+    supabase_uid = session_user.get("id")
+    if not supabase_uid:
+        return render(
+            request,
+            "solicitud_voluntariado.html",
+            {
+                "error": (
+                    "No pudimos verificar tu cuenta. Inicia sesión nuevamente "
+                    "para continuar."
+                )
+            },
+            status=403,
+        )
+
+    try:
+        usuario = Usuario.objects.get(supabase_uid=supabase_uid)
+    except Usuario.DoesNotExist:
+        return render(
+            request,
+            "solicitud_voluntariado.html",
+            {
+                "error": (
+                    "No encontramos los datos asociados a tu cuenta. "
+                    "Inicia sesión nuevamente o contacta al refugio."
+                )
+            },
+            status=403,
+        )
+
+    if Personal.objects.filter(id_usuario=usuario).exists():
+        return render(
+            request,
+            "solicitud_voluntariado.html",
+            {
+                "usuario": usuario,
+                "ya_es_personal": True,
+            },
+        )
+
+    solicitud_pendiente = (
+        SolicitudVoluntariado.objects.filter(
+            id_usuario=usuario,
+            id_estado__tipo_estado="Solicitud",
+            id_estado__nombre="Pendiente",
+        )
+        .order_by("-fecha_solicitud", "-id_solicitud_vol")
+        .first()
+    )
+    form = SolicitudVoluntariadoForm()
+    error = None
+    response_status = 200
+
+    if request.method == "POST" and solicitud_pendiente is None:
+        form = SolicitudVoluntariadoForm(request.POST)
+        if form.is_valid():
+            estado_pendiente = (
+                Estado.objects.filter(
+                    tipo_estado="Solicitud",
+                    nombre="Pendiente",
+                )
+                .order_by("id_estado")
+                .first()
+            )
+            if estado_pendiente is None:
+                error = (
+                    "No es posible enviar la solicitud en este momento. "
+                    "Inténtalo más tarde."
+                )
+                response_status = 503
+                logger.error(
+                    "Pending volunteer application state is missing from the database"
+                )
+            else:
+                solicitud = form.save(commit=False)
+                solicitud.fecha_solicitud = timezone.localdate()
+                solicitud.id_usuario = usuario
+                solicitud.id_estado = estado_pendiente
+                try:
+                    solicitud.save()
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to save volunteer application for user %s",
+                        usuario.pk,
+                    )
+                    error = (
+                        "No pudimos enviar tu solicitud. Revisa los datos "
+                        "e inténtalo nuevamente."
+                    )
+                    response_status = 500
+                else:
+                    messages.success(
+                        request,
+                        "Tu solicitud para unirte al refugio fue enviada correctamente.",
+                    )
+                    return redirect("solicitar_voluntariado")
+
+    return render(
+        request,
+        "solicitud_voluntariado.html",
+        {
+            "form": form,
+            "error": error,
+            "solicitud_pendiente": solicitud_pendiente,
+            "usuario": usuario,
+        },
+        status=(
+            400
+            if request.method == "POST" and form.errors
+            else response_status
+        ),
+    )
+
+
+def gestion_solicitudes(request):
+    if request.method not in {"GET", "POST"}:
+        response = render(
+            request,
+            "gestion_solicitudes.html",
+            {"error": "Método no permitido."},
+            status=405,
+        )
+        response["Allow"] = "GET, POST"
+        return response
+
+    session_user = request.session.get("refugio_usuario")
+    if not session_user:
+        messages.info(request, "Inicia sesión con una cuenta del personal para continuar.")
+        return redirect_to_login(
+            request.get_full_path(),
+            login_url=resolve_url("login_usuario"),
+        )
+
+    supabase_uid = session_user.get("id")
+    if not supabase_uid:
+        return render(
+            request,
+            "gestion_solicitudes.html",
+            {"error": "No pudimos verificar tu cuenta. Inicia sesión nuevamente."},
+            status=403,
+        )
+
+    try:
+        personal = Personal.objects.get(id_usuario__supabase_uid=supabase_uid)
+    except Personal.DoesNotExist:
+        return render(
+            request,
+            "gestion_solicitudes.html",
+            {"error": "Esta sección está disponible para el personal del refugio."},
+            status=403,
+        )
+
+    es_admin = personal.rol == "admin"
+    solicitud_form = GestionSolicitudVoluntariadoForm()
+    personal_form = AltaPersonalDesdeSolicitudForm()
+    filtro_fecha_form = FiltroFechaSolicitudForm(request.GET or None)
+    error = None
+    if request.method == "POST":
+        solicitud = get_object_or_404(
+            SolicitudVoluntariado.objects.select_related("id_estado", "id_usuario"),
+            pk=request.POST.get("solicitud_id"),
+        )
+        if Personal.objects.filter(id_usuario=solicitud.id_usuario).exists():
+            error = (
+                "Esta persona ya forma parte del personal. "
+                "La solicitud no puede volver a modificarse."
+            )
+        elif request.POST.get("action") == "incorporar_personal":
+            if not es_admin:
+                error = "Solo una cuenta admin puede incorporar personal."
+            elif solicitud.id_estado.nombre != "Aprobada":
+                error = (
+                    "La solicitud debe estar aprobada antes de crear "
+                    "el perfil de personal."
+                )
+            else:
+                personal_form = AltaPersonalDesdeSolicitudForm(request.POST)
+                if personal_form.is_valid():
+                    estado_activo = Estado.objects.filter(
+                        tipo_estado="Personal",
+                        nombre="Activo",
+                    ).first()
+                    if estado_activo is None:
+                        error = (
+                            "No se encontró el estado 'Activo' para personal. "
+                            "No se realizó ningún cambio."
+                        )
+                        logger.error(
+                            "Active staff state is missing while incorporating approved application %s",
+                            solicitud.pk,
+                        )
+                    else:
+                        datos_personal = personal_form.cleaned_data
+                        try:
+                            with transaction.atomic():
+                                Personal.objects.create(
+                                    rut_personal=datos_personal["rut_personal"],
+                                    rol=datos_personal["rol"],
+                                    fecha_ingreso=timezone.localdate(),
+                                    telefono_emergencia=datos_personal[
+                                        "telefono_emergencia"
+                                    ],
+                                    direccion=datos_personal["direccion"],
+                                    id_usuario=solicitud.id_usuario,
+                                    id_estado=estado_activo,
+                                    id_solicitud_vol=solicitud,
+                                )
+                        except DatabaseError:
+                            logger.exception(
+                                "Unable to create staff profile from approved application %s by admin %s",
+                                solicitud.pk,
+                                personal.pk,
+                            )
+                            error = (
+                                "No pudimos crear el perfil de personal. "
+                                "Revisa los datos e inténtalo nuevamente."
+                            )
+                        else:
+                            messages.success(
+                                request,
+                                "El perfil de personal se creó correctamente.",
+                            )
+                            return _redirect_to_filtered_solicitudes(request)
+        else:
+            solicitud_form = GestionSolicitudVoluntariadoForm(
+                request.POST,
+                instance=solicitud,
+            )
+            if solicitud_form.is_valid():
+                solicitud_actualizada = solicitud_form.save(commit=False)
+                solicitud_actualizada.fecha_respuesta = (
+                    None
+                    if solicitud_actualizada.id_estado.nombre == "Pendiente"
+                    else timezone.localdate()
+                )
+                try:
+                    solicitud_actualizada.save(
+                        update_fields=("id_estado", "observacion", "fecha_respuesta")
+                    )
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to update volunteer application %s by staff %s",
+                        solicitud.pk,
+                        personal.pk,
+                    )
+                    error = "No pudimos actualizar la solicitud. Inténtalo nuevamente."
+                else:
+                    messages.success(request, "La solicitud se actualizó correctamente.")
+                    return _redirect_to_filtered_solicitudes(request)
+
+    solicitudes_voluntariado = (
+        SolicitudVoluntariado.objects.select_related("id_usuario", "id_estado")
+        .annotate(
+            ya_es_personal=Exists(
+                Personal.objects.filter(id_usuario_id=OuterRef("id_usuario_id"))
+            )
+        )
+        .order_by("-fecha_solicitud", "-id_solicitud_vol")
+    )
+    if filtro_fecha_form.is_valid():
+        fecha_desde = filtro_fecha_form.cleaned_data.get("fecha_desde")
+        fecha_hasta = filtro_fecha_form.cleaned_data.get("fecha_hasta")
+        if fecha_desde:
+            solicitudes_voluntariado = solicitudes_voluntariado.filter(
+                fecha_solicitud__gte=fecha_desde
+            )
+        if fecha_hasta:
+            solicitudes_voluntariado = solicitudes_voluntariado.filter(
+                fecha_solicitud__lte=fecha_hasta
+            )
+    elif filtro_fecha_form.errors:
+        solicitudes_voluntariado = solicitudes_voluntariado.none()
+    return render(
+        request,
+        "gestion_solicitudes.html",
+        {
+            "solicitudes_voluntariado": solicitudes_voluntariado,
+            "solicitud_form": solicitud_form,
+            "personal_form": personal_form,
+            "es_admin": es_admin,
+            "filtro_fecha_form": filtro_fecha_form,
+            "error": error,
+            "personal": personal,
+        },
+        status=(
+            400
+            if solicitud_form.errors
+            or (
+                request.method == "POST"
+                and request.POST.get("action") == "incorporar_personal"
+                and personal_form.errors
+            )
+            or filtro_fecha_form.errors
+            else 200
+        ),
+    )
+
+
+def _redirect_to_filtered_solicitudes(request):
+    query_params = {
+        key: value
+        for key, value in {
+            "fecha_desde": request.POST.get("fecha_desde", ""),
+            "fecha_hasta": request.POST.get("fecha_hasta", ""),
+        }.items()
+        if value
+    }
+    destination = resolve_url("gestion_solicitudes")
+    if query_params:
+        destination = f"{destination}?{urlencode(query_params)}"
+    return redirect(destination)
 
 
 def ficha_animal(request, animal_id):
@@ -851,22 +1202,34 @@ def registro_animal(request):
 
 def login_usuario(request):
     if request.method == "GET":
-        return render(request, "login.html")
+        return render(
+            request,
+            "login.html",
+            {"next": request.GET.get("next", "")},
+        )
     if request.method != "POST":
         return render(
             request,
             "login.html",
-            {"error": "Este formulario solo acepta solicitudes POST."},
+            {
+                "error": "Este formulario solo acepta solicitudes POST.",
+                "next": request.POST.get("next", ""),
+            },
             status=405,
         )
 
+    next_url = request.POST.get("next", "")
     email = request.POST.get("email", "").strip().lower()
     password = request.POST.get("password", "")
     if not email or not password:
         return render(
             request,
             "login.html",
-            {"error": "Ingresa tu correo electrónico y contraseña.", "email": email},
+            {
+                "error": "Ingresa tu correo electrónico y contraseña.",
+                "email": email,
+                "next": next_url,
+            },
             status=400,
         )
     if supabase is None:
@@ -877,7 +1240,8 @@ def login_usuario(request):
                 "error": (
                     "El inicio de sesión no está disponible en este momento. "
                     "Inténtalo más tarde."
-                )
+                ),
+                "next": next_url,
             },
             status=503,
         )
@@ -896,14 +1260,13 @@ def login_usuario(request):
                     "e inténtalo de nuevo."
                 ),
                 "email": email,
+                "next": next_url,
             },
             status=401,
         )
 
     try:
-        usuario = Usuario.objects.select_related("personal").get(
-            supabase_uid=auth_response.user.id
-        )
+        usuario = Usuario.objects.get(supabase_uid=auth_response.user.id)
     except Usuario.DoesNotExist:
         usuario = Usuario.objects.filter(
             correo__iexact=email,
@@ -919,20 +1282,20 @@ def login_usuario(request):
                         "Contacta al equipo del refugio."
                     ),
                     "email": email,
+                    "next": next_url,
                 },
                 status=404,
             )
 
         usuario.supabase_uid = auth_response.user.id
         usuario.save(update_fields=["supabase_uid"])
-        usuario = Usuario.objects.select_related("personal").get(
-            pk=usuario.pk
-        )
+        usuario = Usuario.objects.get(pk=usuario.pk)
 
-    try:
-        personal = usuario.personal
-    except Personal.DoesNotExist:
-        personal = None
+    personal = (
+        Personal.objects.filter(id_usuario=usuario)
+        .order_by("rut_personal")
+        .first()
+    )
 
     nombre = " ".join(
         parte
@@ -951,6 +1314,12 @@ def login_usuario(request):
         "rol": personal.rol if personal else None,
     }
     request.session["supabase_access_token"] = auth_response.session.access_token
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(next_url)
     return redirect("inicio_refugio")
 
 
@@ -1201,19 +1570,18 @@ def login_personal(request):
         )
 
     try:
-        usuario = Usuario.objects.select_related("personal").get(
-            supabase_uid=auth_response.user.id
-        )
+        usuario = Usuario.objects.get(supabase_uid=auth_response.user.id)
     except Usuario.DoesNotExist:
         return JsonResponse(
             {"error": "El usuario no existe en la base de datos local."},
             status=404,
         )
 
-    try:
-        personal = usuario.personal
-    except Personal.DoesNotExist:
-        personal = None
+    personal = (
+        Personal.objects.filter(id_usuario=usuario)
+        .order_by("rut_personal")
+        .first()
+    )
 
     nombre = " ".join(
         parte

@@ -45,7 +45,8 @@
         </div>
 
         {% for message in messages %}
-        <div class="alert alert-success" role="status">{{ message }}</div>
+        <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}"
+             role="status">{{ message }}</div>
         {% endfor %}
 
         {% if error %}
@@ -54,6 +55,9 @@
 
         <form method="post" action="{% url 'login_usuario' %}">
             {% csrf_token %}
+            {% if next %}
+            <input type="hidden" name="next" value="{{ next }}">
+            {% endif %}
             <div class="mb-3">
                 <label class="form-label fw-semibold" for="email">Correo electrónico</label>
                 <input class="form-control form-control-lg" id="email" name="email"

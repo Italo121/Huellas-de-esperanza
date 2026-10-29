@@ -7,8 +7,10 @@ from .models import (
     Animal,
     Estado,
     EvaluacionAnimal,
+    Personal,
     Raza,
     Rescate,
+    SolicitudVoluntariado,
     Tratamiento,
     Vacuna,
 )
@@ -110,6 +112,127 @@ class RegistroUsuarioForm(forms.Form):
         password_confirmation = cleaned_data.get("password_confirmation")
         if password and password_confirmation and password != password_confirmation:
             self.add_error("password_confirmation", "Las contraseñas no coinciden.")
+        return cleaned_data
+
+
+class SolicitudVoluntariadoForm(forms.ModelForm):
+    class Meta:
+        model = SolicitudVoluntariado
+        fields = ("motivacion", "disponibilidad", "experiencia")
+        labels = {
+            "motivacion": "¿Por qué quieres unirte al refugio?",
+            "disponibilidad": "Disponibilidad",
+            "experiencia": "Experiencia relacionada",
+        }
+        widgets = {
+            "motivacion": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 4,
+                    "placeholder": "Cuéntanos qué te motiva a colaborar.",
+                }
+            ),
+            "disponibilidad": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 3,
+                    "placeholder": "Indica días, horarios o frecuencia.",
+                }
+            ),
+            "experiencia": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 3,
+                    "placeholder": "Puedes indicar experiencia o habilidades relevantes.",
+                }
+            ),
+        }
+
+
+class GestionSolicitudVoluntariadoForm(forms.ModelForm):
+    class Meta:
+        model = SolicitudVoluntariado
+        fields = ("id_estado", "observacion")
+        labels = {
+            "id_estado": "Estado de la solicitud",
+            "observacion": "Observación para la persona solicitante",
+        }
+        widgets = {
+            "id_estado": forms.Select(attrs={"class": "form-select"}),
+            "observacion": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 3,
+                    "placeholder": "Agrega una observación o respuesta.",
+                }
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["id_estado"].queryset = Estado.objects.filter(
+            tipo_estado="Solicitud"
+        ).order_by("nombre")
+
+
+class AltaPersonalDesdeSolicitudForm(forms.Form):
+    rut_personal = forms.CharField(
+        max_length=10,
+        label="RUT del personal",
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "autocomplete": "off",
+                "placeholder": "12.345.678-9",
+            }
+        ),
+    )
+    rol = forms.ChoiceField(
+        choices=Personal.ROLES,
+        label="Rol en el refugio",
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    telefono_emergencia = forms.IntegerField(
+        min_value=0,
+        max_value=2147483647,
+        label="Teléfono de emergencia",
+        widget=forms.NumberInput(
+            attrs={"class": "form-control", "min": "0"}
+        ),
+    )
+    direccion = forms.CharField(
+        label="Dirección",
+        widget=forms.Textarea(
+            attrs={"class": "form-control", "rows": 2}
+        ),
+    )
+
+
+class FiltroFechaSolicitudForm(forms.Form):
+    fecha_desde = forms.DateField(
+        required=False,
+        label="Desde",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+    fecha_hasta = forms.DateField(
+        required=False,
+        label="Hasta",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"}
+        ),
+    )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        fecha_desde = cleaned_data.get("fecha_desde")
+        fecha_hasta = cleaned_data.get("fecha_hasta")
+        if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+            self.add_error(
+                "fecha_hasta",
+                "La fecha final debe ser igual o posterior a la fecha inicial.",
+            )
         return cleaned_data
 
 

@@ -6,7 +6,18 @@ from . import views
 urlpatterns = [
     path("", views.inicio, name="inicio_refugio"),
     path("informacion/", views.informacion_refugio, name="informacion_refugio"),
-    path("refugio/",views.informacion_refugio,name="informacion_refugio_alias",),
+    path("refugio/",RedirectView.as_view(pattern_name="informacion_refugio",permanent=False,)
+         ,name="informacion_refugio_alias",),
+    path(
+        "solicitud-voluntariado/",
+        views.solicitar_voluntariado,
+        name="solicitar_voluntariado",
+    ),
+    path(
+        "solicitudes/",
+        views.gestion_solicitudes,
+        name="gestion_solicitudes",
+    ),
     path("salud-animal/", views.gestion_salud_animal, name="gestion_salud_animal"),
     path("vacunas/", views.gestion_vacunas, name="gestion_vacunas"),
     path("animales/<int:animal_id>/editar/", views.editar_animal, name="editar_animal"),

@@ -42,6 +42,37 @@ class Usuario(models.Model):
     class Meta:
         db_table = 'usuario'
 
+
+class SolicitudVoluntariado(models.Model):
+    id_solicitud_vol = models.BigAutoField(primary_key=True)
+    fecha_solicitud = models.DateField()
+    motivacion = models.TextField()
+    disponibilidad = models.TextField()
+    experiencia = models.TextField()
+    observacion = models.TextField(null=True, blank=True)
+    fecha_respuesta = models.DateField(null=True, blank=True)
+    id_usuario = models.ForeignKey(
+        Usuario,
+        on_delete=models.DO_NOTHING,
+        db_column="id_usuario",
+        related_name="solicitudes_voluntariado",
+    )
+    id_estado = models.ForeignKey(
+        Estado,
+        on_delete=models.DO_NOTHING,
+        db_column="id_estado",
+        related_name="solicitudes_voluntariado",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "solicitud_voluntariado"
+        ordering = ("-fecha_solicitud", "-id_solicitud_vol")
+
+    def __str__(self):
+        return f"Solicitud de voluntariado de {self.id_usuario}"
+
+
 class Personal(models.Model):
     ROLES = [
         ('cuidador', 'Cuidador'),
@@ -54,20 +85,38 @@ class Personal(models.Model):
     fecha_ingreso = models.DateField()
     fecha_salida = models.DateField(null=True, blank=True)
     telefono_emergencia = models.IntegerField()
-    direccion = models.CharField(max_length=100)
-    id_usuario = models.OneToOneField(
+    direccion = models.TextField()
+    id_usuario = models.ForeignKey(
         Usuario,
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         db_column='id_usuario',
-        null=True)
-    id_estado = models.OneToOneField(
+        null=True,
+        blank=True,
+        related_name="perfiles_personal",
+    )
+    id_estado = models.ForeignKey(
         Estado,
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         db_column='id_estado',
         null=True,
+        blank=True,
+        related_name="personal",
     )
+    id_solicitud_vol = models.ForeignKey(
+        SolicitudVoluntariado,
+        on_delete=models.DO_NOTHING,
+        db_column="id_solicitud_vol",
+        null=True,
+        blank=True,
+        related_name="personal_asociado",
+    )
+
     class Meta:
-        db_table = 'personal'
+        managed = False
+        db_table = "personal"
+
+    def __str__(self):
+        return self.rut_personal
 
 class Rescate(models.Model):
     CONDICIONES = [

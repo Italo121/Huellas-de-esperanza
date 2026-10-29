@@ -214,21 +214,9 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
-                        <i class="bi bi-clipboard2-heart-fill me-2"></i>
-                        Animales rescatados
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
+                    <a href="{% url 'solicitar_voluntariado' %}" class="nav-link text-white">
                         <i class="bi bi-person-hearts me-2"></i>
                         Unirse al refugio
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
-                        <i class="bi bi-plus-circle-fill me-2"></i>
-                        Registrar un animal
                     </a>
                 </li>
             </ul>
@@ -301,6 +289,7 @@
             </ul>
 
             <!-- Estadísticas y reportes -->
+            {% if es_personal %}
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">
                     Gestion y reportes
@@ -308,12 +297,17 @@
             </div>
 
             <ul class="nav flex-column p-3 pt-2">
-                {% if request.session.refugio_usuario.rol %}
 
                 <li class="nav-item">
                     <a href="#" class="nav-link text-white">
                         <i class="bi bi-people-fill me-2"></i>
                         Personal
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{% url 'gestion_solicitudes' %}" class="nav-link text-white">
+                        <i class="bi bi-inbox-fill me-2" aria-hidden="true"></i>
+                        Solicitudes
                     </a>
                 </li>
                 <li class="nav-item">
@@ -340,9 +334,9 @@
                         Registrar un Animal
                     </a>
                 </li>
-                {% endif %}
-            </ul>
 
+            </ul>
+            {% endif %}
             <!-- Foro -->
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">
@@ -411,7 +405,8 @@
                             </li>
                             {% else %}
                             <li>
-                                <a class="dropdown-item" href="{% url 'login_usuario' %}">
+                                <a class="dropdown-item"
+                                   href="{% url 'login_usuario' %}?next={{ request.get_full_path|urlencode }}">
                                     <i class="bi bi-box-arrow-in-right me-2"></i>
                                     Iniciar sesión
                                 </a>
