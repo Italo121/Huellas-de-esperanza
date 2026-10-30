@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path , include
 from django.shortcuts import render
+from django.views.generic.base import RedirectView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -26,4 +27,5 @@ urlpatterns = [
 
     # Módulo del refugio
     path('refugio/', include('mod_refugio.urls')),
+    path('adopcion/', include('mod_adopcion.urls')),
 ]

@@ -1,0 +1,314 @@
+
+{% extends "index.html" %}
+
+{% block content %}
+<section id="animales" aria-labelledby="catalog-title">
+
+    <!-- Encabezado -->
+    <div class="d-flex flex-wrap justify-content-between
+                align-items-end gap-3 mb-4">
+        <div>
+            <span class="text-success fw-semibold small text-uppercase">
+                Adopciones
+            </span>
+            <h2 class="fw-bold mt-1 mb-1" id="catalog-title">
+                ¡Animales disponibles! 🐾
+            </h2>
+            <p class="text-secondary mb-0">
+                Conoce a quienes están esperando una familia.
+            </p>
+        </div>
+
+        <span class="badge rounded-pill text-bg-success fs-6 px-3 py-2"
+              id="result-count">
+            {{ animales|length }} animales
+        </span>
+    </div>
+
+    <!-- Buscador y filtros -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+        <div class="card-body p-3">
+            <div class="row g-3">
+
+                <div class="col-12 col-md-8">
+                    <label for="animal-search"
+                           class="form-label small fw-semibold">
+                        Buscar animal
+                    </label>
+
+                    <div class="input-group">
+                        <span class="input-group-text bg-white">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input type="search"
+                               class="form-control"
+                               id="animal-search"
+                               placeholder="Nombre o raza..."
+                               autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label for="species-filter"
+                           class="form-label small fw-semibold">
+                        Especie
+                    </label>
+
+                    <select class="form-select" id="species-filter">
+                        <option value="">Todas las especies</option>
+                        {% for especie in especies %}
+                            <option value="{{ especie|lower }}">
+                                {{ especie|capfirst }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Catálogo -->
+    <div class="row g-4" id="animal-grid">
+
+        {% for animal in animales %}
+
+        <article class="col-12 col-sm-6 col-xl-4 animal-entry"
+                 data-species="{{ animal.especie|lower }}"
+                 data-search="{{ animal.nombre|default:''|lower }} {{ animal.raza.nomb_raza|default:''|lower }} {{ animal.especie|lower }}">
+
+            <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden">
+
+                <!-- Fotografía -->
+                {% if animal.foto_url %}
+                    <img src="{{ animal.foto_url }}"
+                         class="w-100"
+                         style="height:230px; object-fit:cover;"
+                         alt="{{ animal.nombre|default:animal.especie }}"
+                         loading="lazy">
+                {% else %}
+                    <div class="d-flex flex-column align-items-center
+                                justify-content-center bg-light text-success"
+                         style="height:230px;">
+                        <i class="bi bi-heart-pulse display-3"></i>
+                        <span class="small text-secondary mt-2">
+                            Fotografía no disponible
+                        </span>
+                    </div>
+                {% endif %}
+
+                <!-- Información -->
+                <div class="card-body p-4 d-flex flex-column">
+
+                    <div class="d-flex justify-content-between
+                                align-items-center mb-2">
+                        <span class="badge rounded-pill text-bg-success">
+                            {{ animal.especie|capfirst }}
+                        </span>
+
+                        <small class="text-secondary">
+                            #{{ animal.id_animal }}
+                        </small>
+                    </div>
+
+                    <h3 class="h5 fw-bold mb-1">
+                        {{ animal.nombre|default:"Esperando nombre" }}
+                    </h3>
+
+                    <p class="text-secondary mb-3">
+                        {{ animal.raza.nomb_raza|default:"Raza no identificada" }}
+                    </p>
+
+                    <div class="small mb-3">
+                        <p class="mb-2">
+                            <i class="bi bi-hourglass-split text-success me-2"></i>
+                            {{ animal.edad_aprox }} años aprox.
+                        </p>
+                        <p class="mb-2">
+                            <i class="bi bi-gender-ambiguous text-success me-2"></i>
+                            {{ animal.sexo|capfirst }}
+                        </p>
+                        <p class="mb-2">
+                            <i class="bi bi-speedometer2 text-success me-2"></i>
+                            {{ animal.peso }} kg
+                        </p>
+                        <p class="mb-0">
+                            <i class="bi bi-heart-pulse text-success me-2"></i>
+                            {{ animal.condicion|cut:"_"|capfirst }}
+                        </p>
+                    </div>
+
+                    {% if animal.descripcion %}
+                        <p class="small text-secondary">
+                            {{ animal.descripcion|truncatewords:20 }}
+                        </p>
+                    {% endif %}
+
+                    <div class="mt-auto pt-3">
+                        <a href="{% url 'mod_adopcion:detalle_animal' animal.id_animal %}"
+                        class="btn btn-outline-success w-100">
+                            <i class="bi bi-eye me-2"></i>
+                            Ver detalles
+                        </a>
+                    </div>
+
+                </div>
+            </div>
+        </article>
+
+        {% empty %}
+            <div class="col-12">
+                <div class="text-center bg-white rounded-4 p-5 shadow-sm">
+                    <i class="bi bi-heart display-3 text-success"></i>
+                    <h3 class="h5 mt-3">Todavía no hay animales</h3>
+                    <p class="text-secondary mb-0">
+                        Cuando se registren animales, aparecerán en este catálogo.
+                    </p>
+                </div>
+            </div>
+        {% endfor %}
+
+    </div>
+
+    <div id="no-results"
+         class="alert alert-light border text-center mt-4 d-none"
+         role="status">
+        No encontramos animales con esos filtros.
+    </div>
+
+</section>
+
+<!-- Modal de información -->
+<div class="modal fade" id="animalModal" tabindex="-1"
+     aria-labelledby="animalModalTitle" aria-hidden="true">
+
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 rounded-4 shadow">
+
+            <div class="modal-header">
+                <h2 class="modal-title fs-5 fw-bold"
+                    id="animalModalTitle">
+                    Ficha del animal
+                </h2>
+                <button type="button" class="btn-close"
+                        data-bs-dismiss="modal"
+                        aria-label="Cerrar"></button>
+            </div>
+
+            <div class="modal-body">
+                <p class="text-secondary" id="modal-description"></p>
+
+                <div class="row g-3">
+                    <div class="col-6">
+                        <small class="text-secondary">Especie</small>
+                        <div id="modal-species" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-secondary">Raza</small>
+                        <div id="modal-breed" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-secondary">Edad aproximada</small>
+                        <div id="modal-age" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-secondary">Sexo</small>
+                        <div id="modal-sex" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-secondary">Peso</small>
+                        <div id="modal-weight" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-secondary">Microchip</small>
+                        <div id="modal-microchip" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-12">
+                        <small class="text-secondary">Condición</small>
+                        <div id="modal-condition" class="fw-semibold"></div>
+                    </div>
+                    <div class="col-12">
+                        <small class="text-secondary">Lugar del rescate</small>
+                        <div id="modal-location" class="fw-semibold"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary"
+                        data-bs-dismiss="modal">
+                    Cerrar
+                </button>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const searchInput = document.getElementById("animal-search");
+    const speciesFilter = document.getElementById("species-filter");
+    const entries = document.querySelectorAll(".animal-entry");
+    const resultCount = document.getElementById("result-count");
+    const noResults = document.getElementById("no-results");
+
+    function filterAnimals() {
+        const search = searchInput.value.trim().toLocaleLowerCase();
+        const species = speciesFilter.value;
+        let visible = 0;
+
+        entries.forEach(function (entry) {
+            const matchesSearch =
+                entry.dataset.search.includes(search);
+            const matchesSpecies =
+                !species || entry.dataset.species === species;
+
+            const show = matchesSearch && matchesSpecies;
+            entry.classList.toggle("d-none", !show);
+
+            if (show) visible++;
+        });
+
+        resultCount.textContent =
+            `${visible} animal${visible === 1 ? "" : "es"}`;
+
+        noResults.classList.toggle("d-none", visible !== 0);
+    }
+
+    searchInput.addEventListener("input", filterAnimals);
+    speciesFilter.addEventListener("change", filterAnimals);
+
+    const modal = document.getElementById("animalModal");
+
+    modal.addEventListener("show.bs.modal", function (event) {
+        const button = event.relatedTarget;
+        if (!button) return;
+
+        const data = button.dataset;
+
+        document.getElementById("animalModalTitle").textContent =
+            data.name;
+        document.getElementById("modal-description").textContent =
+            data.description;
+        document.getElementById("modal-species").textContent =
+            data.species;
+        document.getElementById("modal-breed").textContent =
+            data.breed;
+        document.getElementById("modal-age").textContent =
+            data.age + " años aprox.";
+        document.getElementById("modal-sex").textContent =
+            data.sex;
+        document.getElementById("modal-weight").textContent =
+            data.weight + " kg";
+        document.getElementById("modal-condition").textContent =
+            data.condition;
+        document.getElementById("modal-location").textContent =
+            data.location;
+        document.getElementById("modal-microchip").textContent =
+            data.microchip;
+    });
+});
+</script>
+
+{% endblock %}

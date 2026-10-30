@@ -1,0 +1,442 @@
+
+{% extends "index.html" %}
+
+{% block title %}Información del refugio | Huellas de esperanza{% endblock %}
+
+{% block content %}
+
+<style>
+    /* CONTENEDOR PRINCIPAL */
+    .shelter-page {
+        width: 100%;
+        max-width: 1150px;
+        margin: 0 auto;
+        padding: 10px;
+        color: #343a40;
+    }
+
+    /* ENCABEZADO */
+    .shelter-hero {
+        position: relative;
+        overflow: hidden;
+        border-radius: 20px;
+        background: linear-gradient(135deg, #198754, #105c3b);
+        min-height: 220px;
+        display: flex;
+        align-items: center;
+        box-shadow: 0 8px 25px rgba(25, 135, 84, .15);
+    }
+
+    .shelter-hero::after {
+        content: "\F4DA";
+        font-family: "bootstrap-icons";
+        position: absolute;
+        right: 35px;
+        bottom: -40px;
+        font-size: 12rem;
+        color: rgba(255,255,255,.08);
+        pointer-events: none;
+    }
+
+    .shelter-hero h1 {
+        color: white;
+        overflow-wrap: anywhere;
+    }
+
+    .shelter-hero p {
+        color: rgba(255,255,255,.9);
+    }
+
+    /* TARJETAS */
+    .info-card {
+        height: 100%;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        box-shadow: 0 4px 15px rgba(0,0,0,.045);
+        transition: transform .2s ease, box-shadow .2s ease;
+    }
+
+    .info-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 22px rgba(0,0,0,.08);
+    }
+
+    .info-card h2 {
+        color: #495057;
+    }
+
+    .info-card p,
+    .info-card a {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    .info-icon {
+        width: 55px;
+        height: 55px;
+        border-radius: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #e9f5ee;
+        color: #198754;
+        font-size: 1.6rem;
+    }
+
+    /* MAPA */
+    .map-container {
+        width: 100%;
+        overflow: hidden;
+        border-radius: 12px;
+        border: 1px solid #dee2e6;
+    }
+
+    .map-frame {
+        width: 100%;
+        height: 420px;
+        min-height: 280px;
+        background: #e9ecef;
+        z-index: 1;
+    }
+
+    /* TEXTOS */
+    .shelter-page p {
+        line-height: 1.65;
+    }
+
+    .shelter-page h2 {
+        line-height: 1.4;
+    }
+
+    /* ESTADO SIN INFORMACIÓN */
+    .empty-shelter {
+        border: 1px dashed #adb5bd;
+        border-radius: 18px;
+        background: white;
+    }
+
+    /* TABLETS */
+    @media (max-width: 991.98px) {
+        .shelter-page {
+            max-width: 100%;
+        }
+
+        .map-frame {
+            height: 350px;
+        }
+    }
+
+    /* CELULARES */
+    @media (max-width: 767.98px) {
+        .shelter-page {
+            padding: 5px;
+        }
+
+        .shelter-hero {
+            min-height: 190px;
+            padding: 1.5rem !important;
+        }
+
+        .shelter-hero h1 {
+            font-size: 1.9rem;
+        }
+
+        .shelter-hero::after {
+            font-size: 8rem;
+            right: 5px;
+        }
+
+        .info-card {
+            padding: 1.25rem !important;
+        }
+
+        .map-frame {
+            height: 300px;
+        }
+    }
+
+    @media (max-width: 400px) {
+        .shelter-hero h1 {
+            font-size: 1.6rem;
+        }
+
+        .shelter-page .btn {
+            width: 100%;
+        }
+    }
+</style>
+
+<main class="shelter-page">
+
+    {% if refugio %}
+
+    <!-- ENCABEZADO -->
+    <header class="shelter-hero text-white p-4 p-md-5 mt-2 mb-4">
+        <div class="position-relative z-1">
+            <span class="badge rounded-pill bg-white text-success mb-3 px-3 py-2">
+                <i class="bi bi-heart-fill me-1"></i>
+                Un lugar para cuidar y dar esperanza
+            </span>
+
+            <h1 class="display-5 fw-bold mb-2">
+                {{ refugio.nombre }}
+            </h1>
+
+            <p class="lead mb-0">
+                Conoce nuestro refugio y encuentra cómo ponerte en contacto.
+            </p>
+        </div>
+    </header>
+
+    <!-- INFORMACIÓN DE CONTACTO -->
+    <section class="row g-3 g-md-4 mb-4"
+             aria-label="Datos de contacto">
+
+        <!-- DIRECCIÓN -->
+        <div class="col-12 col-md-4">
+            <article class="info-card p-4">
+
+                <div class="info-icon mb-3">
+                    <i class="bi bi-geo-alt-fill"></i>
+                </div>
+
+                <h2 class="h6 text-secondary text-uppercase fw-bold">
+                    Dirección
+                </h2>
+
+                <p class="fs-5 fw-semibold mb-0">
+                    {{ refugio.direccion }}
+                </p>
+
+            </article>
+        </div>
+
+        <!-- TELÉFONO -->
+        <div class="col-12 col-md-4">
+            <article class="info-card p-4">
+
+                <div class="info-icon mb-3">
+                    <i class="bi bi-telephone-fill"></i>
+                </div>
+
+                <h2 class="h6 text-secondary text-uppercase fw-bold">
+                    Teléfono
+                </h2>
+
+                <a class="fs-5 fw-semibold link-success text-decoration-none"
+                   href="tel:{{ refugio.telefono }}">
+                    {{ refugio.telefono }}
+                </a>
+
+            </article>
+        </div>
+
+        <!-- CORREO -->
+        <div class="col-12 col-md-4">
+            <article class="info-card p-4">
+
+                <div class="info-icon mb-3">
+                    <i class="bi bi-envelope-fill"></i>
+                </div>
+
+                <h2 class="h6 text-secondary text-uppercase fw-bold">
+                    Correo electrónico
+                </h2>
+
+                <a class="fs-5 fw-semibold link-success text-decoration-none text-break"
+                   href="mailto:{{ refugio.correo }}">
+                    {{ refugio.correo }}
+                </a>
+
+            </article>
+        </div>
+
+    </section>
+
+    <!-- UBICACIÓN DEL REFUGIO -->
+    <section class="info-card p-3 p-md-4 mb-4"
+             aria-labelledby="location-title">
+
+        <div class="d-flex flex-column flex-md-row
+                    justify-content-between gap-3 mb-3">
+
+            <div>
+                <h2 class="h4 fw-bold mb-1" id="location-title">
+                    <i class="bi bi-map-fill text-success me-2"></i>
+                    Encuéntranos
+                </h2>
+
+                <p class="text-secondary mb-0">
+                    Explora el mapa para ubicar nuestro refugio.
+                </p>
+            </div>
+
+            {% if external_map_url %}
+            <a class="btn btn-outline-success align-self-md-center"
+               href="{{ external_map_url }}"
+               target="_blank"
+               rel="noopener noreferrer">
+
+                <i class="bi bi-box-arrow-up-right me-1"></i>
+                Abrir mapa
+
+            </a>
+            {% endif %}
+
+        </div>
+
+        {% if coordenadas_validas %}
+
+        <div class="map-container">
+
+            <div id="refuge-map"
+                 class="map-frame"
+                 role="application"
+                 aria-label="Mapa de ubicación de {{ refugio.nombre }}"
+                 data-latitude="{{ refugio.latitud }}"
+                 data-longitude="{{ refugio.longitud }}"
+                 data-name="{{ refugio.nombre }}"
+                 data-address="{{ refugio.direccion }}">
+            </div>
+
+            <div id="map-status"
+                 class="alert alert-info py-2 px-3 mb-0"
+                 role="status">
+                <i class="bi bi-hourglass-split me-2"></i>
+                Cargando mapa...
+            </div>
+
+        </div>
+
+        <p class="small text-secondary mt-2 mb-0">
+            <i class="bi bi-geo-alt me-1"></i>
+            Coordenadas: {{ refugio.latitud }}, {{ refugio.longitud }}
+        </p>
+
+        {% else %}
+
+        <div class="alert alert-info mb-0" role="status">
+            <i class="bi bi-info-circle me-2"></i>
+            La ubicación del refugio todavía no está disponible en el mapa.
+        </div>
+
+        {% endif %}
+
+    </section>
+
+    {% else %}
+
+    <!-- SIN INFORMACIÓN DEL REFUGIO -->
+    <section class="empty-shelter text-center p-4 p-md-5 mt-3">
+
+        <div class="info-icon mx-auto mb-3">
+            <i class="bi bi-house-heart-fill"></i>
+        </div>
+
+        <h1 class="h3 fw-bold">
+            Información del refugio
+        </h1>
+
+        <p class="text-secondary mb-0">
+            Aún no hay información del refugio disponible.
+        </p>
+
+    </section>
+
+    {% endif %}
+
+</main>
+
+<!-- LEAFLET -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin="">
+</script>
+
+{% if coordenadas_validas %}
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+
+        const mapElement = document.getElementById("refuge-map");
+        const mapStatus = document.getElementById("map-status");
+
+        if (!window.L || !mapElement || !mapStatus) {
+            if (mapStatus) {
+                mapStatus.classList.remove("alert-info");
+                mapStatus.classList.add("alert-warning");
+                mapStatus.textContent = "No se pudo cargar el mapa.";
+            }
+            return;
+        }
+
+        const latitude = Number(mapElement.dataset.latitude);
+        const longitude = Number(mapElement.dataset.longitude);
+
+        if (
+            !Number.isFinite(latitude) ||
+            !Number.isFinite(longitude) ||
+            Math.abs(latitude) > 90 ||
+            Math.abs(longitude) > 180
+        ) {
+            mapStatus.classList.remove("alert-info");
+            mapStatus.classList.add("alert-warning");
+            mapStatus.textContent = "Las coordenadas del refugio no son válidas.";
+            return;
+        }
+
+        const map = L.map(mapElement).setView(
+            [latitude, longitude],
+            16
+        );
+
+        const tiles = L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                maxZoom: 19,
+                attribution:
+                    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }
+        ).addTo(map);
+
+        const popupContent = document.createElement("div");
+
+        const shelterName = document.createElement("strong");
+        shelterName.textContent = mapElement.dataset.name;
+
+        popupContent.append(
+            shelterName,
+            document.createElement("br"),
+            document.createTextNode(mapElement.dataset.address)
+        );
+
+        L.marker([latitude, longitude])
+            .addTo(map)
+            .bindPopup(popupContent);
+
+        tiles.once("load", function () {
+            mapStatus.remove();
+        });
+
+        tiles.on("tileerror", function () {
+            mapStatus.classList.remove("alert-info");
+            mapStatus.classList.add("alert-warning");
+
+            mapStatus.textContent =
+                "No se pudieron cargar las imágenes del mapa. Revisa tu conexión.";
+        });
+
+        // Ajustar mapa cuando cambia el tamaño de la pantalla
+        setTimeout(function () {
+            map.invalidateSize();
+        }, 300);
+
+        window.addEventListener("resize", function () {
+            map.invalidateSize();
+        });
+
+    });
+</script>
+{% endif %}
+
+{% endblock %}

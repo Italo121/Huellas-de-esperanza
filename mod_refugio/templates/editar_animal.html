@@ -1,0 +1,84 @@
+{% extends "index.html" %}
+
+{% block content %}
+    <main class="form-card bg-white p-4 p-md-5 my-3">
+        {% include "_account_nav.html" %}
+        <header class="mb-4">
+            {% if animal %}
+            <a class="link-success text-decoration-none small"
+               href="{% url 'ficha_animal' animal.id_animal %}">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
+                Volver a la ficha
+            </a>
+            {% else %}
+            <a class="link-success text-decoration-none small"
+               href="{% url 'inicio_refugio' %}">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
+                Volver al inicio
+            </a>
+            {% endif %}
+            <h1 class="h2 fw-bold mt-3 mb-1">Editar información</h1>
+            <p class="text-secondary mb-0">
+                {% if animal %}
+                Actualiza los datos de {{ animal.nombre|default:animal.especie }}.
+                {% else %}
+                No tienes permiso para editar la información de animales.
+                {% endif %}
+            </p>
+        </header>
+
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+
+        {% if animal and animal.foto_url %}
+        <div class="mb-4">
+            <p class="form-label fw-semibold">Foto actual</p>
+            <img class="img-fluid rounded" src="{{ animal.foto_url }}"
+                 alt="Foto actual de {{ animal.nombre|default:animal.especie }}"
+                 style="max-height: 240px; object-fit: cover;">
+        </div>
+        {% endif %}
+
+        {% if form and animal %}
+        <form method="post"
+              action="{% url 'editar_animal' animal.id_animal %}"
+              enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="row g-3">
+                {% for field in form %}
+                <div class="col-12 {% if field.name != 'descripcion' and field.name != 'lugar_rescate' %}col-md-6{% endif %}">
+                    {% if field.name == "microchip" %}
+                    <div class="form-check pt-md-4">
+                        {{ field }}
+                        <label class="form-check-label fw-semibold"
+                               for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    </div>
+                    {% else %}
+                    <label class="form-label fw-semibold"
+                           for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% endif %}
+                    {% if field.name == "foto" %}
+                    <div class="form-text">JPG, PNG o WEBP; máximo 5 MB. Déjalo vacío para conservar la foto actual.</div>
+                    {% endif %}
+                    {% if field.errors %}
+                    <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="d-flex flex-column flex-sm-row justify-content-end gap-2 mt-4">
+                <a class="btn btn-outline-secondary btn-lg"
+                   href="{% url 'ficha_animal' animal.id_animal %}">Cancelar</a>
+                <button class="btn btn-success btn-lg" type="submit">
+                    <i class="bi bi-check-circle me-2" aria-hidden="true"></i>
+                    Guardar cambios
+                </button>
+            </div>
+        </form>
+        {% endif %}
+    </main>
+{% {% endblock %}%}
+

@@ -1,0 +1,90 @@
+{% extends "index.html" %}
+
+{% block content %}
+    <main class="form-card bg-white p-4 p-md-5 my-3">
+        {% include "_account_nav.html" %}
+        <header class="mb-4">
+            <a class="link-success text-decoration-none small"
+               href="{% url 'inicio_refugio' %}">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
+                Volver al refugio
+            </a>
+            <h1 class="h2 fw-bold mt-3 mb-1">Registrar un animal</h1>
+            <p class="text-secondary mb-0">
+                Completa la información del animal y del rescate.
+            </p>
+        </header>
+
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+
+        {% if form %}
+        <div class="alert alert-success-subtle border border-success-subtle" role="note">
+            <i class="bi bi-info-circle me-1" aria-hidden="true"></i>
+            El rescate se creará junto con el animal y quedará asociado a tu perfil
+            del personal. La raza y los estados deben existir previamente en el sistema.
+            Puedes adjuntar una foto JPG, PNG o WEBP de hasta 5 MB.
+        </div>
+
+        <form method="post" action="{% url 'registro_animal' %}"
+              enctype="multipart/form-data">
+            {% csrf_token %}
+            <section class="mb-4" aria-labelledby="animal-fields-title">
+                <h2 class="h5 fw-bold border-bottom pb-2 mb-3" id="animal-fields-title">
+                    <i class="bi bi-heart-pulse text-success me-2" aria-hidden="true"></i>
+                    Datos del animal
+                </h2>
+                <div class="row g-3">
+                    {% for field in animal_fields %}
+                    <div class="col-12 {% if field.name == 'nombre' or field.name == 'edad_aprox' or field.name == 'sexo' or field.name == 'peso' or field.name == 'condicion' or field.name == 'especie' or field.name == 'foto_url' or field.name == 'fecha_ingreso' or field.name == 'comportamiento' or field.name == 'raza' or field.name == 'estado_animal' %}col-md-6{% endif %}">
+                        {% if field.name == "microchip" %}
+                        <div class="form-check pt-md-4">
+                            {{ field }}
+                            <label class="form-check-label fw-semibold"
+                                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        </div>
+                        {% else %}
+                        <label class="form-label fw-semibold"
+                               for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% endif %}
+                        {% if field.errors %}
+                        <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section class="mb-4" aria-labelledby="rescue-fields-title">
+                <h2 class="h5 fw-bold border-bottom pb-2 mb-3" id="rescue-fields-title">
+                    <i class="bi bi-geo-alt text-success me-2" aria-hidden="true"></i>
+                    Datos del rescate
+                </h2>
+                <div class="row g-3">
+                    {% for field in rescue_fields %}
+                    <div class="col-12 {% if field.name == 'fecha_rescate' or field.name == 'condicion_inicial' or field.name == 'observacion_rescate' or field.name == 'estado_rescate' %}col-md-6{% endif %}">
+                        <label class="form-label fw-semibold"
+                               for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                        <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <div class="d-flex flex-column flex-sm-row justify-content-end gap-2">
+                <a class="btn btn-outline-secondary btn-lg"
+                   href="{% url 'inicio_refugio' %}">Cancelar</a>
+                <button class="btn btn-success btn-lg" type="submit">
+                    <i class="bi bi-check-circle me-2" aria-hidden="true"></i>
+                    Guardar animal
+                </button>
+            </div>
+        </form>
+        {% endif %}
+    </main>
+{% endblock %}
