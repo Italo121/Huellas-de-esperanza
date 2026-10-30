@@ -15,14 +15,19 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path , include
+from django.urls import include, path
+from django.views.generic import RedirectView
 from django.shortcuts import render
 
 urlpatterns = [
     path('admin/', admin.site.urls),
 
     # Página principal
-    path('', lambda request: render(request, 'base.html'), name='inicio'),
+    path(
+        '',
+        RedirectView.as_view(pattern_name='inicio_refugio', permanent=False),
+        name='inicio',
+    ),
 
     # Módulo del refugio
     path('refugio/', include('mod_refugio.urls')),

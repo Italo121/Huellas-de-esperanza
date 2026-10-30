@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Salud animal | Huellas de esperanza</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          rel="stylesheet">
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #e9f5ee 0%, #f8f9fa 55%, #d1e7dd 100%);
+        }
+
+        .health-page {
+            width: min(100%, 1120px);
+        }
+
+        .health-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 1rem;
+            box-shadow: 0 .5rem 1.5rem rgba(33, 37, 41, .08);
+        }
+    </style>
+</head>
+<body class="p-3 py-md-5">
+    <main class="health-page mx-auto">
+        {% include "_account_nav.html" %}
+        <header class="d-flex flex-column flex-md-row justify-content-between gap-3 mb-4">
+            <div>
+                <a class="link-success text-decoration-none small"
+                   href="{% url 'inicio_refugio' %}">
+                    <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
+                    Volver al catálogo
+                </a>
+                <h1 class="h2 fw-bold mt-3 mb-1">Salud de los animales</h1>
+                <p class="text-secondary mb-0">
+                    Consulta evaluaciones y tratamientos registrados por veterinarios.
+                </p>
+            </div>
+        </header>
+
+        {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-success" role="status">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+        {% if veterinario_sin_perfil %}
+        <div class="alert alert-warning" role="alert">
+            Tu cuenta tiene rol de veterinario, pero aún no cuenta con un perfil
+            veterinario habilitado para registrar información.
+        </div>
+        {% endif %}
+
+        {% if animales %}
+        <section class="health-card bg-white p-3 p-md-4 mb-4"
+                 aria-labelledby="animal-select-title">
+            <h2 class="h5 fw-bold mb-3" id="animal-select-title">
+                Seleccionar animal
+            </h2>
+            <form method="get" action="{% url 'gestion_salud_animal' %}"
+                  class="row g-2 align-items-end">
+                <div class="col-12 col-md-8">
+                    <label class="form-label" for="animal-select">Animal</label>
+                    <select class="form-select" name="animal" id="animal-select" required>
+                        <option value="">Selecciona un animal</option>
+                        {% for option in animales %}
+                        <option value="{{ option.pk }}"
+                                {% if animal and animal.pk == option.pk %}selected{% endif %}>
+                            {{ option.nombre|default:"Sin nombre" }} · {{ option.especie|capfirst }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-auto">
+                    <button class="btn btn-success" type="submit">
+                        <i class="bi bi-search me-1" aria-hidden="true"></i>
+                        Consultar ficha de salud
+                    </button>
+                </div>
+            </form>
+        </section>
+        {% endif %}
+
+        {% if animal %}
+        <section class="health-card bg-white p-3 p-md-4 mb-4">
+            <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-3">
+                {% if animal.foto_url %}
+                <img src="{{ animal.foto_url }}"
+                     alt="Foto de {{ animal.nombre|default:animal.especie }}"
+                     class="rounded object-fit-cover"
+                     style="width: 96px; height: 96px;">
+                {% else %}
+                <div class="rounded bg-success-subtle text-success d-grid place-items-center"
+                     style="width: 96px; height: 96px; place-items: center;">
+                    <i class="bi bi-heart-pulse fs-1" aria-hidden="true"></i>
+                </div>
+                {% endif %}
+                <div>
+                    <span class="text-success text-uppercase fw-semibold small">Animal seleccionado</span>
+                    <h2 class="h3 fw-bold mb-1">{{ animal.nombre|default:"Sin nombre" }}</h2>
+                    <p class="text-secondary mb-0">
+                        {{ animal.especie|capfirst }}{% if animal.raza %} · {{ animal.raza.nomb_raza }}{% endif %}
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <div class="row g-4">
+            <div class="col-12 col-lg-6">
+                <section class="health-card bg-white p-3 p-md-4 h-100">
+                    <h2 class="h4 fw-bold mb-3">
+                        <i class="bi bi-clipboard2-pulse text-success me-2" aria-hidden="true"></i>
+                        Evaluaciones
+                    </h2>
+                    {% if evaluaciones %}
+                    <div class="d-grid gap-3 mb-4">
+                        {% for evaluacion in evaluaciones %}
+                        <article class="border rounded-3 p-3">
+                            <div class="d-flex justify-content-between gap-2">
+                                <h3 class="h6 fw-bold mb-2">{{ evaluacion.get_estado_salud_display }}</h3>
+                                <time class="small text-secondary"
+                                      datetime="{{ evaluacion.fecha|date:'Y-m-d' }}">
+                                    {{ evaluacion.fecha|date:"d/m/Y" }}
+                                </time>
+                            </div>
+                            <p class="mb-2">{{ evaluacion.observacion }}</p>
+                            <span class="badge {% if evaluacion.necesita_tratamiento %}text-bg-warning{% else %}text-bg-success{% endif %}">
+                                {% if evaluacion.necesita_tratamiento %}
+                                Requiere tratamiento
+                                {% else %}
+                                No requiere tratamiento
+                                {% endif %}
+                            </span>
+                            <p class="small text-secondary mt-2 mb-0">
+                                {% with evaluador=evaluacion.rut_personal.rut_personal.id_usuario %}
+                                Evaluó:
+                                {% if evaluador %}
+                                {{ evaluador.p_nombre }} {{ evaluador.ap_paterno }}
+                                {% else %}
+                                Personal veterinario
+                                {% endif %}
+                                {% endwith %}
+                            </p>
+                        </article>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-secondary">Este animal todavía no tiene evaluaciones.</p>
+                    {% endif %}
+
+                    {% if puede_registrar %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_salud_animal' %}?animal={{ animal.pk }}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="evaluacion">
+                        <input type="hidden" name="animal_id" value="{{ animal.pk }}">
+                        <h3 class="h5 fw-bold mb-3">Registrar evaluación</h3>
+                        {% for field in evaluation_form %}
+                        <div class="mb-3">
+                            {% if field.name == "necesita_tratamiento" %}
+                            <div class="form-check">
+                                {{ field }}
+                                <label class="form-check-label"
+                                       for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            </div>
+                            {% else %}
+                            <label class="form-label"
+                                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% endif %}
+                            {% if field.errors %}
+                            <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                        <button class="btn btn-success" type="submit">
+                            Guardar evaluación
+                        </button>
+                    </form>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo un veterinario puede registrar evaluaciones.
+                    </p>
+                    {% endif %}
+                </section>
+            </div>
+
+            <div class="col-12 col-lg-6">
+                <section class="health-card bg-white p-3 p-md-4 h-100">
+                    <h2 class="h4 fw-bold mb-3">
+                        <i class="bi bi-capsule text-success me-2" aria-hidden="true"></i>
+                        Tratamientos
+                    </h2>
+                    {% if tratamientos %}
+                    <div class="d-grid gap-3 mb-4">
+                        {% for tratamiento in tratamientos %}
+                        <article class="border rounded-3 p-3">
+                            <div class="d-flex justify-content-between gap-2">
+                                <h3 class="h6 fw-bold mb-2">{{ tratamiento.get_tipo_tratamiento_display }}</h3>
+                                <span class="badge text-bg-success">
+                                    {{ tratamiento.id_estado.nombre }}
+                                </span>
+                            </div>
+                            <p class="small text-secondary mb-2">
+                                {{ tratamiento.fecha_inicio|date:"d/m/Y" }}
+                                {% if tratamiento.fecha_termino %}
+                                – {{ tratamiento.fecha_termino|date:"d/m/Y" }}
+                                {% endif %}
+                            </p>
+                            <p class="mb-2">{{ tratamiento.detalle }}</p>
+                            <p class="small mb-1"><strong>Diagnóstico:</strong> {{ tratamiento.diagnostico }}</p>
+                            <p class="small mb-1"><strong>Costo:</strong> ${{ tratamiento.costo }}</p>
+                            {% if tratamiento.observacion %}
+                            <p class="small mb-1"><strong>Observaciones:</strong> {{ tratamiento.observacion }}</p>
+                            {% endif %}
+                            <p class="small text-secondary mt-2 mb-0">
+                                {% with responsable=tratamiento.rut_personal.rut_personal.id_usuario %}
+                                Responsable:
+                                {% if responsable %}
+                                {{ responsable.p_nombre }} {{ responsable.ap_paterno }}
+                                {% else %}
+                                Personal veterinario
+                                {% endif %}
+                                {% endwith %}
+                            </p>
+                        </article>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-secondary">Este animal todavía no tiene tratamientos.</p>
+                    {% endif %}
+
+                    {% if puede_registrar_tratamiento %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_salud_animal' %}?animal={{ animal.pk }}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="tratamiento">
+                        <input type="hidden" name="animal_id" value="{{ animal.pk }}">
+                        <h3 class="h5 fw-bold mb-3">Registrar tratamiento</h3>
+                        {% for field in treatment_form %}
+                        <div class="mb-3">
+                            <label class="form-label"
+                                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.errors %}
+                            <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                        <button class="btn btn-success" type="submit">
+                            Guardar tratamiento
+                        </button>
+                    </form>
+                    {% elif puede_registrar %}
+                    <div class="alert alert-info mb-0">
+                        El tratamiento estará disponible cuando la evaluación más
+                        reciente indique que el animal lo necesita.
+                    </div>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo un veterinario puede registrar tratamientos.
+                    </p>
+                    {% endif %}
+                </section>
+            </div>
+        </div>
+        {% endif %}
+    </main>
+</body>
+</html>

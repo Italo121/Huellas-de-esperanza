@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vacunas | Huellas de esperanza</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          rel="stylesheet">
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #e9f5ee 0%, #f8f9fa 55%, #d1e7dd 100%);
+        }
+
+        .vaccine-page {
+            width: min(100%, 1120px);
+        }
+
+        .vaccine-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 1rem;
+            box-shadow: 0 .5rem 1.5rem rgba(33, 37, 41, .08);
+        }
+    </style>
+</head>
+<body class="p-3 py-md-5">
+    <main class="vaccine-page mx-auto">
+        {% include "_account_nav.html" %}
+        <header class="mb-4">
+            <a class="link-success text-decoration-none small"
+               href="{% url 'inicio_refugio' %}">
+                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
+                Volver al catálogo
+            </a>
+            <h1 class="h2 fw-bold mt-3 mb-1">Vacunas de los animales</h1>
+            <p class="text-secondary mb-0">
+                Consulta el historial de vacunación y registra aplicaciones o próximas dosis.
+            </p>
+        </header>
+
+        {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-success" role="status">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+        {% if veterinario_sin_perfil %}
+        <div class="alert alert-warning" role="alert">
+            Tu cuenta tiene rol de veterinario, pero aún no cuenta con un perfil
+            veterinario habilitado para registrar información.
+        </div>
+        {% endif %}
+
+        {% if animales %}
+        <section class="vaccine-card bg-white p-3 p-md-4 mb-4"
+                 aria-labelledby="animal-select-title">
+            <h2 class="h5 fw-bold mb-3" id="animal-select-title">Seleccionar animal</h2>
+            <form method="get" action="{% url 'gestion_vacunas' %}"
+                  class="row g-2 align-items-end">
+                <div class="col-12 col-md-8">
+                    <label class="form-label" for="animal-select">Animal</label>
+                    <select class="form-select" name="animal" id="animal-select" required>
+                        <option value="">Selecciona un animal</option>
+                        {% for option in animales %}
+                        <option value="{{ option.pk }}"
+                                {% if animal and animal.pk == option.pk %}selected{% endif %}>
+                            {{ option.nombre|default:"Sin nombre" }} · {{ option.especie|capfirst }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-auto">
+                    <button class="btn btn-success" type="submit">
+                        <i class="bi bi-search me-1" aria-hidden="true"></i>
+                        Consultar vacunas
+                    </button>
+                </div>
+            </form>
+        </section>
+        {% endif %}
+
+        {% if animal %}
+        <section class="vaccine-card bg-white p-3 p-md-4 mb-4">
+            <span class="text-success text-uppercase fw-semibold small">Animal seleccionado</span>
+            <h2 class="h3 fw-bold mb-1">{{ animal.nombre|default:"Sin nombre" }}</h2>
+            <p class="text-secondary mb-0">
+                {{ animal.especie|capfirst }}{% if animal.raza %} · {{ animal.raza.nomb_raza }}{% endif %}
+            </p>
+        </section>
+
+        <section class="vaccine-card bg-white p-3 p-md-4"
+                 aria-labelledby="vaccines-title">
+            <h2 class="h4 fw-bold mb-3" id="vaccines-title">
+                <i class="bi bi-capsule-pill text-success me-2" aria-hidden="true"></i>
+                Historial de vacunas
+            </h2>
+            {% if vacunas_animal %}
+            <div class="table-responsive mb-4">
+                <table class="table table-striped align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col">Vacuna</th>
+                            <th scope="col">Aplicación</th>
+                            <th scope="col">Próxima dosis</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for registro in vacunas_animal %}
+                        <tr>
+                            <th scope="row">
+                                {{ registro.id_vacuna.nomb_vacuna }}
+                                {% if registro.id_vacuna.descripcion %}
+                                <span class="d-block small text-secondary fw-normal">
+                                    {{ registro.id_vacuna.descripcion }}
+                                </span>
+                                {% endif %}
+                            </th>
+                            <td>
+                                {% if registro.aplicada %}
+                                {{ registro.fecha_aplicacion|date:"d/m/Y" }}
+                                {% else %}
+                                Programada para {{ registro.fecha_aplicacion|date:"d/m/Y" }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if registro.fecha_prox_dosis %}
+                                {{ registro.fecha_prox_dosis|date:"d/m/Y" }}
+                                {% else %}
+                                No requiere refuerzo programado
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if registro.aplicada %}
+                                <span class="badge text-bg-success">Aplicada</span>
+                                {% else %}
+                                <span class="badge text-bg-warning">Pendiente</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ registro.observacion }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-secondary mb-4">Este animal todavía no tiene vacunas registradas.</p>
+            {% endif %}
+
+            {% if puede_registrar %}
+            <form method="post" class="border-top pt-4"
+                  action="{% url 'gestion_vacunas' %}?animal={{ animal.pk }}">
+                {% csrf_token %}
+                <input type="hidden" name="animal_id" value="{{ animal.pk }}">
+                <h3 class="h5 fw-bold mb-3">Registrar vacuna</h3>
+                <div class="row g-3">
+                    {% for field in vacuna_form %}
+                    <div class="col-12 {% if field.name != 'observacion' %}col-md-6{% endif %}">
+                        {% if field.name == "aplicada" %}
+                        <div class="form-check pt-md-4">
+                            {{ field }}
+                            <label class="form-check-label"
+                                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        </div>
+                        {% else %}
+                        <label class="form-label"
+                               for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% endif %}
+                        {% if field.name == "fecha_prox_dosis" %}
+                        <div class="form-text">Opcional. Déjalo vacío si no necesita otra dosis.</div>
+                        {% endif %}
+                        {% if field.errors %}
+                        <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <button class="btn btn-success mt-3" type="submit">
+                    Guardar vacuna
+                </button>
+            </form>
+            {% else %}
+            <p class="small text-secondary border-top pt-3 mb-0">
+                Solo un veterinario puede registrar vacunas.
+            </p>
+            {% endif %}
+        </section>
+        {% endif %}
+    </main>
+</body>
+</html>

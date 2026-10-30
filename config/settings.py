@@ -10,10 +10,16 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
@@ -80,10 +86,42 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+database_url = os.environ.get("DATABASE_URL")
+if not database_url:
+    raise ImproperlyConfigured("DATABASE_URL is missing; configure it in .env.")
+
+try:
+    database = urlsplit(database_url)
+    database_port = database.port or 5432
+except ValueError as error:
+    raise ImproperlyConfigured("DATABASE_URL has an invalid format or port.") from error
+
+if (
+    database.scheme not in {"postgres", "postgresql"}
+    or not database.hostname
+    or not database.username
+    or not database.password
+    or not database.path.strip("/")
+    or "[YOUR-PASSWORD]" in database_url
+):
+    raise ImproperlyConfigured(
+        "DATABASE_URL must be a complete PostgreSQL URL with valid credentials."
+    )
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": unquote(database.path.lstrip("/")),
+        "USER": unquote(database.username),
+        "PASSWORD": unquote(database.password),
+        "HOST": database.hostname,
+        "PORT": str(database_port),
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {
+            "sslmode": "require",
+            "connect_timeout": 10,
+        },
     }
 }
 

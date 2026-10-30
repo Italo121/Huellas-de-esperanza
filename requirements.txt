@@ -1,0 +1,5 @@
+Django==6.1.1
+python-dotenv
+psycopg2
+supabase
+Pillow
