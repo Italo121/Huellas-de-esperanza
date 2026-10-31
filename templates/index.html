@@ -242,12 +242,6 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="{% url 'mod_adopcion:seguimiento_adopciones' %}" class="nav-link text-white">
-                        <i class="bi bi-journal-check me-2"></i>
-                        Seguimiento
-                    </a>
-                </li>
-                <li class="nav-item">
                     <a href="{% url 'mod_adopcion:mis_adopciones' %}" class="nav-link text-white">
                         <i class="bi bi-journal-check me-2"></i>
                         Mis adopciones
@@ -301,7 +295,7 @@
 
             <!-- Estadísticas y reportes -->
 
-            {% if es_personal %}
+        {% if es_personal %}
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">
                     Gestion y reportes
@@ -323,10 +317,10 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="{% url 'mod_adopcion:gestion_solicitudes_adopcion' %}"
+                    <a href="{% url 'mod_adopcion:seguimiento_adopciones' %}"
                        class="nav-link text-white">
-                        <i class="bi bi-house-heart me-2" aria-hidden="true"></i>
-                        Solicitudes de adopción
+                        <i class="bi bi-journal-check me-2" aria-hidden="true"></i>
+                        Seguimiento de adopciones
                     </a>
                 </li>
                 <li class="nav-item">
@@ -355,7 +349,7 @@
                 </li>
 
             </ul>
-            {% endif %}
+        {% endif %}
             <!-- Foro -->
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">

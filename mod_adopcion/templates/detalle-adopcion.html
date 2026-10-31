@@ -237,9 +237,139 @@
             </div>
         {% endif %}
 
+        {% if es_personal %}
+            <button type="button"
+                    class="btn btn-success"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modalSeguimiento">
+                <i class="bi bi-plus-circle me-2"></i>
+                Agregar seguimiento
+            </button>
+        {% endif %}
+
 
         </div>
     </div>
 
 </section>
+
+{% if es_personal %}
+<div class="modal fade" id="modalSeguimiento" tabindex="-1"
+     aria-labelledby="modalSeguimientoLabel" aria-hidden="true">
+
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 rounded-4 shadow">
+
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="modalSeguimientoLabel">
+                    <i class="bi bi-clipboard2-heart text-success me-2"></i>
+                    Registrar seguimiento
+                </h5>
+
+                <button type="button" class="btn-close"
+                        data-bs-dismiss="modal"></button>
+            </div>
+
+            <form method="POST"
+                  action="{% url 'mod_adopcion:agregar_seguimiento' adopcion.id_adopcion %}">
+
+                {% csrf_token %}
+
+                <div class="modal-body">
+
+                    <p class="text-secondary">
+                        Adopción #{{ adopcion.id_adopcion }} -
+                        {{ adopcion.id_animal.nombre|default:"Animal sin nombre" }}
+                    </p>
+
+                    <label class="form-label fw-semibold">
+                        Tipo de seguimiento
+                    </label>
+
+                    <div class="form-check">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               name="llamada"
+                               id="llamada">
+
+                        <label class="form-check-label" for="llamada">
+                            Llamada
+                        </label>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               name="visita"
+                               id="visita">
+
+                        <label class="form-check-label" for="visita">
+                            Visita
+                        </label>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="anotacion" class="form-label fw-semibold">
+                            Observaciones
+                        </label>
+
+                        <textarea name="anotacion"
+                                  id="anotacion"
+                                  class="form-control"
+                                  rows="4"
+                                  placeholder="Describe cómo se encuentra el animal..."></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="evidencia" class="form-label fw-semibold">
+                            Evidencia
+                        </label>
+
+                        <textarea name="evidencia"
+                                  id="evidencia"
+                                  class="form-control"
+                                  rows="2"
+                                  placeholder="Agrega un enlace o referencia de evidencia (opcional)"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="id_estado" class="form-label fw-semibold">
+                            Estado del seguimiento
+                        </label>
+
+                        <select name="id_estado"
+                                id="id_estado"
+                                class="form-select"
+                                required>
+                            <option value="">Selecciona un estado</option>
+
+                            {% for estado in estados_seguimiento %}
+                                <option value="{{ estado.id_estado }}">
+                                    {{ estado.nombre }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button"
+                            class="btn btn-outline-secondary"
+                            data-bs-dismiss="modal">
+                        Cancelar
+                    </button>
+
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-save me-2"></i>
+                        Guardar seguimiento
+                    </button>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

@@ -1,6 +1,6 @@
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.http import HttpResponse
 from django.test import SimpleTestCase
@@ -10,7 +10,7 @@ from django.urls import resolve, reverse
 from .forms import RespuestaSolicitudAdopcionForm, SolicitudAdopcionForm
 from . import views
 from .models import SolicitudAdopcion
-from .views import gestion_solicitudes_adopcion, solicitar_adopcion
+from .views import solicitar_adopcion
 
 
 class SolicitudAdopcionSchemaTests(SimpleTestCase):
@@ -74,11 +74,71 @@ class SolicitudAdopcionUrlTests(SimpleTestCase):
         self.assertEqual(path, "/adopcion/solicitar/7/")
         self.assertIs(resolve(path).func, solicitar_adopcion)
 
-    def test_staff_review_route_resolves_to_existing_view(self):
-        path = reverse("mod_adopcion:gestion_solicitudes_adopcion")
 
-        self.assertEqual(path, "/adopcion/gestion-solicitudes/")
-        self.assertIs(resolve(path).func, gestion_solicitudes_adopcion)
+class SeguimientoAdopcionAccessTests(SimpleTestCase):
+    def test_anonymous_user_is_redirected_from_follow_up_list(self):
+        request = RequestFactory().get("/adopcion/seguimiento/")
+        request.session = {}
+
+        response = views.listar_seguimientos(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login_usuario"), response.url)
+
+    def test_non_staff_cannot_access_follow_up_list(self):
+        request = RequestFactory().get("/adopcion/seguimiento/")
+        request.session = {"refugio_usuario": {"id": "public-user"}}
+
+        with patch("mod_adopcion.views.Personal.objects.filter") as personal_filter:
+            personal_filter.return_value.exists.return_value = False
+            response = views.listar_seguimientos(request)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_staff_cannot_access_adoption_detail_or_post_follow_up(self):
+        request = RequestFactory().get("/adopcion/seguimiento/2/")
+        request.session = {"refugio_usuario": {"id": "public-user"}}
+        post_request = RequestFactory().post(
+            "/adopcion/seguimiento/agregar/2/",
+            {"llamada": "on", "id_estado": "1"},
+        )
+        post_request.session = request.session
+
+        with patch("mod_adopcion.views.Personal.objects.filter") as personal_filter:
+            personal_filter.return_value.exists.return_value = False
+            detail_response = views.detalle_adopcion(request, id_adopcion=2)
+            post_response = views.agregar_seguimiento(
+                post_request,
+                id_adopcion=2,
+            )
+
+        self.assertEqual(detail_response.status_code, 403)
+        self.assertEqual(post_response.status_code, 403)
+
+    def test_personal_can_access_follow_up_list(self):
+        request = RequestFactory().get("/adopcion/seguimiento/")
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        adopciones = [SimpleNamespace(id_adopcion=2)]
+
+        with (
+            patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
+            patch("mod_adopcion.views.Adopcion.objects.select_related") as queryset,
+            patch(
+                "mod_adopcion.views.render",
+                return_value=HttpResponse("follow-ups"),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            queryset.return_value.only.return_value.all.return_value.order_by.return_value = (
+                adopciones
+            )
+            response = views.listar_seguimientos(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            render_mock.call_args.args[2]["adopciones"],
+            adopciones,
+        )
 
 
 class SolicitudAdopcionViewTests(SimpleTestCase):
@@ -128,70 +188,3 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             id_estado=state,
             fecha_solicitud=views.timezone.localdate(),
         )
-
-    def test_review_approves_only_for_active_staff(self):
-        request = RequestFactory().post(
-            "/adopcion/gestion-solicitudes/",
-            {"solicitud_id": "11", "action": "aprobada", "respuesta": "Aprobada"},
-        )
-        request.session = {"refugio_usuario": {"id": "staff-uuid"}}
-        personal = SimpleNamespace(pk="12345678-9")
-        solicitud = SimpleNamespace(
-            id_estado=SimpleNamespace(nombre="Pendiente"),
-            save=MagicMock(),
-        )
-        approved_state = SimpleNamespace(nombre="Aprobada")
-
-        with (
-            patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
-            patch("mod_adopcion.views.Estado.objects.filter") as state_filter,
-            patch(
-                "mod_adopcion.views.SolicitudAdopcion.objects.select_for_update"
-            ) as requests_for_update,
-            patch("mod_adopcion.views.get_object_or_404", return_value=solicitud),
-            patch(
-                "mod_adopcion.views.transaction.atomic",
-                return_value=nullcontext(),
-            ),
-            patch("mod_adopcion.views.messages.success"),
-        ):
-            personal_filter.return_value.order_by.return_value.first.return_value = (
-                personal
-            )
-            state_filter.return_value.order_by.return_value.first.return_value = (
-                approved_state
-            )
-            requests_for_update.return_value = MagicMock()
-
-            response = gestion_solicitudes_adopcion(request)
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(solicitud.id_estado, approved_state)
-        self.assertEqual(solicitud.respuesta, "Aprobada")
-        self.assertEqual(solicitud.respondida_por, personal)
-        solicitud.save.assert_called_once()
-
-    def test_review_denies_non_staff(self):
-        request = RequestFactory().get("/adopcion/gestion-solicitudes/")
-        request.session = {"refugio_usuario": {"id": "public-uuid"}}
-
-        with (
-            patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
-            patch(
-                "mod_adopcion.views.render",
-                return_value=HttpResponse(status=403),
-            ) as render_mock,
-        ):
-            personal_filter.return_value.order_by.return_value.first.return_value = None
-            response = gestion_solicitudes_adopcion(request)
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            personal_filter.call_args.kwargs,
-            {
-                "id_usuario__supabase_uid": "public-uuid",
-                "id_estado__tipo_estado": "Personal",
-                "id_estado__nombre": "Activo",
-            },
-        )
-        render_mock.assert_called_once()

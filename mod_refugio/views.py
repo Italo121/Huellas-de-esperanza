@@ -4,17 +4,21 @@ from decimal import Decimal
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from httpx import ReadTimeout
 from django.db import DatabaseError, transaction
 from django.db.models import Exists, OuterRef
 from django.http import JsonResponse
 from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from httpx import ReadTimeout
+from mod_adopcion.forms import RespuestaSolicitudAdopcionForm
+from mod_adopcion.models import Estado as EstadoAdopcion
+from mod_adopcion.models import SolicitudAdopcion
 
 from .forms import (
     AltaPersonalDesdeSolicitudForm,
@@ -58,25 +62,12 @@ def inicio(request):
         .distinct()
     )
 
-    session_user = request.session.get("refugio_usuario") or {}
-    supabase_uid = session_user.get("id")
-
-    es_personal = False
-
-    if supabase_uid:
-        es_personal = Personal.objects.filter(
-            id_usuario__supabase_uid=supabase_uid,
-            id_estado__tipo_estado="Personal",
-            id_estado__nombre="Activo"
-        ).exists()
-
     return render(
         request,
         "index.html",
         {
             "animales": animales,
             "especies": especies,
-            "es_personal": es_personal,
         },
     )
 
@@ -280,102 +271,182 @@ def gestion_solicitudes(request):
         )
 
     es_admin = personal.rol == "admin"
+    puede_gestionar_adopciones = Personal.objects.filter(
+        pk=personal.pk,
+        id_estado__tipo_estado="Personal",
+        id_estado__nombre="Activo",
+    ).exists()
     solicitud_form = GestionSolicitudVoluntariadoForm()
     personal_form = AltaPersonalDesdeSolicitudForm()
+    respuesta_adopcion_form = RespuestaSolicitudAdopcionForm()
     filtro_fecha_form = FiltroFechaSolicitudForm(request.GET or None)
     error = None
     if request.method == "POST":
-        solicitud = get_object_or_404(
-            SolicitudVoluntariado.objects.select_related("id_estado", "id_usuario"),
-            pk=request.POST.get("solicitud_id"),
-        )
-        if Personal.objects.filter(id_usuario=solicitud.id_usuario).exists():
-            error = (
-                "Esta persona ya forma parte del personal. "
-                "La solicitud no puede volver a modificarse."
-            )
-        elif request.POST.get("action") == "incorporar_personal":
-            if not es_admin:
-                error = "Solo una cuenta admin puede incorporar personal."
-            elif solicitud.id_estado.nombre != "Aprobada":
-                error = (
-                    "La solicitud debe estar aprobada antes de crear "
-                    "el perfil de personal."
-                )
+        if request.POST.get("tipo_solicitud") == "adopcion":
+            respuesta_adopcion_form = RespuestaSolicitudAdopcionForm(request.POST)
+            solicitud_id = request.POST.get("solicitud_adopcion_id")
+            if not puede_gestionar_adopciones:
+                error = "Esta sección está disponible para el personal activo del refugio."
+            elif not respuesta_adopcion_form.is_valid():
+                error = "Selecciona una acción válida para responder la solicitud."
+            elif not solicitud_id:
+                error = "No se identificó la solicitud que quieres responder."
             else:
-                personal_form = AltaPersonalDesdeSolicitudForm(request.POST)
-                if personal_form.is_valid():
-                    estado_activo = Estado.objects.filter(
-                        tipo_estado="Personal",
-                        nombre="Activo",
-                    ).first()
-                    if estado_activo is None:
-                        error = (
-                            "No se encontró el estado 'Activo' para personal. "
-                            "No se realizó ningún cambio."
-                        )
-                        logger.error(
-                            "Active staff state is missing while incorporating approved application %s",
-                            solicitud.pk,
-                        )
-                    else:
-                        datos_personal = personal_form.cleaned_data
-                        try:
-                            with transaction.atomic():
-                                Personal.objects.create(
-                                    rut_personal=datos_personal["rut_personal"],
-                                    rol=datos_personal["rol"],
-                                    fecha_ingreso=timezone.localdate(),
-                                    telefono_emergencia=datos_personal[
-                                        "telefono_emergencia"
-                                    ],
-                                    direccion=datos_personal["direccion"],
-                                    id_usuario=solicitud.id_usuario,
-                                    id_estado=estado_activo,
-                                    id_solicitud_vol=solicitud,
-                                )
-                        except DatabaseError:
-                            logger.exception(
-                                "Unable to create staff profile from approved application %s by admin %s",
-                                solicitud.pk,
-                                personal.pk,
-                            )
-                            error = (
-                                "No pudimos crear el perfil de personal. "
-                                "Revisa los datos e inténtalo nuevamente."
-                            )
-                        else:
-                            messages.success(
-                                request,
-                                "El perfil de personal se creó correctamente.",
-                            )
-                            return _redirect_to_filtered_solicitudes(request)
-        else:
-            solicitud_form = GestionSolicitudVoluntariadoForm(
-                request.POST,
-                instance=solicitud,
-            )
-            if solicitud_form.is_valid():
-                solicitud_actualizada = solicitud_form.save(commit=False)
-                solicitud_actualizada.fecha_respuesta = (
-                    None
-                    if solicitud_actualizada.id_estado.nombre == "Pendiente"
-                    else timezone.localdate()
-                )
                 try:
-                    solicitud_actualizada.save(
-                        update_fields=("id_estado", "observacion", "fecha_respuesta")
-                    )
+                    with transaction.atomic():
+                        solicitud_adopcion = get_object_or_404(
+                            SolicitudAdopcion.objects.select_for_update()
+                            .select_related("id_estado"),
+                            pk=solicitud_id,
+                        )
+                        if solicitud_adopcion.id_estado.nombre not in {
+                            "Pendiente",
+                            "En Revisión",
+                        }:
+                            error = "Esta solicitud ya fue respondida."
+                        else:
+                            estado_nombre = (
+                                "Aprobada"
+                                if respuesta_adopcion_form.cleaned_data["action"]
+                                == SolicitudAdopcion.APROBADA
+                                else "Rechazada"
+                            )
+                            estado_adopcion = EstadoAdopcion.objects.filter(
+                                tipo_estado="Solicitud",
+                                nombre=estado_nombre,
+                            ).order_by("id_estado").first()
+                            if estado_adopcion is None:
+                                error = (
+                                    "No se encontró el estado para responder la solicitud. "
+                                    "No se realizó ningún cambio."
+                                )
+                                logger.error(
+                                    "Adoption request state %s is missing from the database",
+                                    estado_nombre,
+                                )
+                            else:
+                                solicitud_adopcion.id_estado = estado_adopcion
+                                solicitud_adopcion.respuesta = (
+                                    respuesta_adopcion_form.cleaned_data["respuesta"]
+                                )
+                                solicitud_adopcion.fecha_respuesta = timezone.localdate()
+                                solicitud_adopcion.respondida_por = personal
+                                solicitud_adopcion.save(
+                                    update_fields=(
+                                        "id_estado",
+                                        "respuesta",
+                                        "fecha_respuesta",
+                                        "respondida_por",
+                                    )
+                                )
                 except DatabaseError:
                     logger.exception(
-                        "Unable to update volunteer application %s by staff %s",
-                        solicitud.pk,
+                        "Unable to respond to adoption request %s by staff member %s",
+                        solicitud_id,
                         personal.pk,
                     )
-                    error = "No pudimos actualizar la solicitud. Inténtalo nuevamente."
+                    error = "No pudimos guardar la respuesta. Inténtalo nuevamente."
                 else:
-                    messages.success(request, "La solicitud se actualizó correctamente.")
-                    return _redirect_to_filtered_solicitudes(request)
+                    if error is None:
+                        messages.success(
+                            request,
+                            "La solicitud de adopción fue respondida correctamente.",
+                        )
+                        return redirect(
+                            f"{reverse('gestion_solicitudes')}#adopcion"
+                        )
+        else:
+            solicitud = get_object_or_404(
+                SolicitudVoluntariado.objects.select_related("id_estado", "id_usuario"),
+                pk=request.POST.get("solicitud_id"),
+            )
+            if Personal.objects.filter(id_usuario=solicitud.id_usuario).exists():
+                error = (
+                    "Esta persona ya forma parte del personal. "
+                    "La solicitud no puede volver a modificarse."
+                )
+            elif request.POST.get("action") == "incorporar_personal":
+                if not es_admin:
+                    error = "Solo una cuenta admin puede incorporar personal."
+                elif solicitud.id_estado.nombre != "Aprobada":
+                    error = (
+                        "La solicitud debe estar aprobada antes de crear "
+                        "el perfil de personal."
+                    )
+                else:
+                    personal_form = AltaPersonalDesdeSolicitudForm(request.POST)
+                    if personal_form.is_valid():
+                        estado_activo = Estado.objects.filter(
+                            tipo_estado="Personal",
+                            nombre="Activo",
+                        ).first()
+                        if estado_activo is None:
+                            error = (
+                                "No se encontró el estado 'Activo' para personal. "
+                                "No se realizó ningún cambio."
+                            )
+                            logger.error(
+                                "Active staff state is missing while incorporating approved application %s",
+                                solicitud.pk,
+                            )
+                        else:
+                            datos_personal = personal_form.cleaned_data
+                            try:
+                                with transaction.atomic():
+                                    Personal.objects.create(
+                                        rut_personal=datos_personal["rut_personal"],
+                                        rol=datos_personal["rol"],
+                                        fecha_ingreso=timezone.localdate(),
+                                        telefono_emergencia=datos_personal[
+                                            "telefono_emergencia"
+                                        ],
+                                        direccion=datos_personal["direccion"],
+                                        id_usuario=solicitud.id_usuario,
+                                        id_estado=estado_activo,
+                                        id_solicitud_vol=solicitud,
+                                    )
+                            except DatabaseError:
+                                logger.exception(
+                                    "Unable to create staff profile from approved application %s by admin %s",
+                                    solicitud.pk,
+                                    personal.pk,
+                                )
+                                error = (
+                                    "No pudimos crear el perfil de personal. "
+                                    "Revisa los datos e inténtalo nuevamente."
+                                )
+                            else:
+                                messages.success(
+                                    request,
+                                    "El perfil de personal se creó correctamente.",
+                                )
+                                return _redirect_to_filtered_solicitudes(request)
+            else:
+                solicitud_form = GestionSolicitudVoluntariadoForm(
+                    request.POST,
+                    instance=solicitud,
+                )
+                if solicitud_form.is_valid():
+                    solicitud_actualizada = solicitud_form.save(commit=False)
+                    solicitud_actualizada.fecha_respuesta = (
+                        None
+                        if solicitud_actualizada.id_estado.nombre == "Pendiente"
+                        else timezone.localdate()
+                    )
+                    try:
+                        solicitud_actualizada.save(
+                            update_fields=("id_estado", "observacion", "fecha_respuesta")
+                        )
+                    except DatabaseError:
+                        logger.exception(
+                            "Unable to update volunteer application %s by staff %s",
+                            solicitud.pk,
+                            personal.pk,
+                        )
+                        error = "No pudimos actualizar la solicitud. Inténtalo nuevamente."
+                    else:
+                        messages.success(request, "La solicitud se actualizó correctamente.")
+                        return _redirect_to_filtered_solicitudes(request)
 
     solicitudes_voluntariado = (
         SolicitudVoluntariado.objects.select_related("id_usuario", "id_estado")
@@ -399,13 +470,26 @@ def gestion_solicitudes(request):
             )
     elif filtro_fecha_form.errors:
         solicitudes_voluntariado = solicitudes_voluntariado.none()
+    solicitudes_adopcion = SolicitudAdopcion.objects.filter(
+        id_estado__tipo_estado="Solicitud",
+    ).select_related(
+        "id_animal",
+        "id_usuario",
+        "id_estado",
+        "respondida_por",
+        "respondida_por__id_usuario",
+    )
     return render(
         request,
         "gestion_solicitudes.html",
         {
             "solicitudes_voluntariado": solicitudes_voluntariado,
+            "solicitudes_adopcion": solicitudes_adopcion,
             "solicitud_form": solicitud_form,
             "personal_form": personal_form,
+            "respuesta_adopcion_form": respuesta_adopcion_form,
+            "puede_ver_solicitudes_adopcion": True,
+            "puede_gestionar_adopciones": puede_gestionar_adopciones,
             "es_admin": es_admin,
             "filtro_fecha_form": filtro_fecha_form,
             "error": error,
@@ -418,6 +502,11 @@ def gestion_solicitudes(request):
                 request.method == "POST"
                 and request.POST.get("action") == "incorporar_personal"
                 and personal_form.errors
+            )
+            or (
+                request.method == "POST"
+                and request.POST.get("tipo_solicitud") == "adopcion"
+                and error
             )
             or filtro_fecha_form.errors
             else 200
@@ -1614,5 +1703,3 @@ def login_personal(request):
             else None,
         }
     )
-
-

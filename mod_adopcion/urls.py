@@ -28,8 +28,8 @@ urlpatterns = [
         name="solicitar_adopcion"
     ),
     path(
-        "gestion-solicitudes/",
-        views.gestion_solicitudes_adopcion,
-        name="gestion_solicitudes_adopcion",
+    "seguimiento/agregar/<int:id_adopcion>/",
+    views.agregar_seguimiento,
+    name="agregar_seguimiento"
     ),
 ]

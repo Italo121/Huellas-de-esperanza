@@ -15,7 +15,7 @@
 
         <p class="text-secondary mb-0">
             Aquí puedes consultar los animales que has adoptado
-            y revisar el estado de tus adopciones.
+            y las fechas de tus adopciones.
         </p>
     </div>
 
@@ -104,12 +104,6 @@
                                 </p>
 
                             </div>
-
-                            <a href="{% url 'mod_adopcion:detalle_adopcion' adopcion.id_adopcion %}"
-                               class="btn btn-outline-success w-100 mb-2">
-                                <i class="bi bi-eye me-2"></i>
-                                Ver detalles
-                            </a>
 
                             {% if not adopcion.fecha_termino %}
                                 <button

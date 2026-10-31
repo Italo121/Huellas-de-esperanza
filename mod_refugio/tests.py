@@ -15,6 +15,7 @@ from django.test import RequestFactory, SimpleTestCase
 from django.urls import resolve, reverse
 from httpx import ReadTimeout
 
+from .context_processors import personal_context
 from . import views
 from .forms import FiltroFechaSolicitudForm
 from .models import (
@@ -94,16 +95,10 @@ class InformacionRefugioTests(SimpleTestCase):
         self.assertIsNone(context["external_map_url"])
 
 
-class InicioTests(SimpleTestCase):
-    @patch("mod_refugio.views.Personal.objects.filter")
-    @patch("mod_refugio.views.Animal.objects.order_by")
-    @patch("mod_refugio.views.Animal.objects.select_related")
-    @patch("mod_refugio.views.render", return_value=HttpResponse("home"))
-    def test_staff_menu_visibility_uses_database_membership_not_session_role(
+class StaffContextTests(SimpleTestCase):
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_staff_menu_visibility_uses_membership_not_session_role(
         self,
-        render_mock,
-        animals_select_related,
-        animals_order_by,
         personal_filter,
     ):
         request = RequestFactory().get("/refugio/")
@@ -113,39 +108,43 @@ class InicioTests(SimpleTestCase):
                 "rol": None,
             }
         }
-        animals_select_related.return_value.order_by.return_value = []
-        animals_order_by.return_value.values_list.return_value.distinct.return_value = []
         personal_filter.return_value.exists.return_value = True
 
-        response = views.inicio(request)
-
-        self.assertEqual(response.status_code, 200)
+        context = personal_context(request)
         personal_filter.assert_called_once_with(
-            id_usuario__supabase_uid="admin-user-uuid"
+            id_usuario__supabase_uid="admin-user-uuid",
         )
-        self.assertTrue(render_mock.call_args.args[2]["es_personal"])
+        self.assertTrue(context["es_personal"])
 
-    @patch("mod_refugio.views.Personal.objects.filter")
-    @patch("mod_refugio.views.Animal.objects.order_by")
-    @patch("mod_refugio.views.Animal.objects.select_related")
-    @patch("mod_refugio.views.render", return_value=HttpResponse("home"))
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
     def test_public_user_does_not_get_staff_menu(
         self,
-        render_mock,
-        animals_select_related,
-        animals_order_by,
         personal_filter,
     ):
         request = RequestFactory().get("/refugio/")
-        request.session = {"refugio_usuario": {"id": "public-user-uuid"}}
-        animals_select_related.return_value.order_by.return_value = []
-        animals_order_by.return_value.values_list.return_value.distinct.return_value = []
-        personal_filter.return_value.exists.return_value = False
+        request.session = {}
 
-        response = views.inicio(request)
+        context = personal_context(request)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(render_mock.call_args.args[2]["es_personal"])
+        personal_filter.assert_not_called()
+        self.assertFalse(context["es_personal"])
+
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_staff_menu_is_available_in_base_template_on_other_pages(
+        self,
+        personal_filter,
+    ):
+        request = RequestFactory().get("/adopcion/seguimiento/")
+        request.session = {"refugio_usuario": {"id": "staff-user-uuid"}}
+        personal_filter.return_value.exists.return_value = True
+
+        html = render_to_string("index.html", request=request)
+
+        self.assertIn("Gestion y reportes", html)
+        self.assertIn(
+            'href="/adopcion/seguimiento/"',
+            html,
+        )
 
 
 class AccountNavigationTests(SimpleTestCase):
@@ -348,6 +347,9 @@ class GestionSolicitudesTests(SimpleTestCase):
                 ),
             ),
             patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+            patch(
                 "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
                 return_value=queryset,
             ),
@@ -356,6 +358,7 @@ class GestionSolicitudesTests(SimpleTestCase):
                 return_value=HttpResponse("requests"),
             ),
         ):
+            personal_filter.return_value.exists.return_value = True
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 200)
@@ -365,6 +368,212 @@ class GestionSolicitudesTests(SimpleTestCase):
         queryset.filter.assert_any_call(
             fecha_solicitud__lte=date(2026, 10, 31)
         )
+
+    def test_adoption_review_uses_shared_staff_management_view(self):
+        path = reverse("gestion_solicitudes")
+        self.assertIs(resolve(path).func, views.gestion_solicitudes)
+
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "adopcion",
+                "solicitud_adopcion_id": "11",
+                "action": "aprobada",
+                "respuesta": "Aprobada",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        solicitud = SimpleNamespace(
+            id_estado=SimpleNamespace(nombre="Pendiente"),
+            save=MagicMock(),
+        )
+        estado_aprobado = SimpleNamespace(nombre="Aprobada")
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as estado_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=solicitud,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            estado_filter.return_value.order_by.return_value.first.return_value = (
+                estado_aprobado
+            )
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{path}#adopcion")
+        self.assertIs(solicitud.id_estado, estado_aprobado)
+        self.assertEqual(solicitud.respuesta, "Aprobada")
+        self.assertEqual(solicitud.respondida_por, personal)
+        solicitud.save.assert_called_once_with(
+            update_fields=(
+                "id_estado",
+                "respuesta",
+                "fecha_respuesta",
+                "respondida_por",
+            )
+        )
+
+    def test_inactive_staff_cannot_respond_to_adoption_requests(self):
+        request = RequestFactory().post(
+            "/refugio/solicitudes/",
+            {
+                "tipo_solicitud": "adopcion",
+                "solicitud_adopcion_id": "11",
+                "action": "aprobada",
+                "respuesta": "",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        volunteer_queryset = MagicMock()
+        volunteer_queryset.annotate.return_value = volunteer_queryset
+        volunteer_queryset.order_by.return_value = volunteer_queryset
+        adoption_queryset = MagicMock()
+        adoption_queryset.select_related.return_value = adoption_queryset
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="12345678-9", rol="cuidador"),
+            ),
+            patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
+                return_value=volunteer_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.filter",
+                return_value=adoption_queryset,
+            ) as adoption_filter,
+            patch("mod_refugio.views.get_object_or_404") as get_object,
+            patch(
+                "mod_refugio.views.render",
+                return_value=HttpResponse("requests", status=400),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 400)
+        get_object.assert_not_called()
+        self.assertIn(
+            "personal activo",
+            render_mock.call_args.args[2]["error"],
+        )
+        adoption_filter.assert_called_once_with(
+            id_estado__tipo_estado="Solicitud",
+        )
+        self.assertTrue(
+            render_mock.call_args.args[2]["puede_ver_solicitudes_adopcion"]
+        )
+        self.assertFalse(
+            render_mock.call_args.args[2]["puede_gestionar_adopciones"]
+        )
+
+    def test_inactive_staff_can_view_adoption_requests(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        volunteer_queryset = MagicMock()
+        volunteer_queryset.annotate.return_value = volunteer_queryset
+        volunteer_queryset.order_by.return_value = volunteer_queryset
+        adoption_queryset = MagicMock()
+        adoption_queryset.select_related.return_value = adoption_queryset
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="12345678-9", rol="cuidador"),
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
+                return_value=volunteer_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.filter",
+                return_value=adoption_queryset,
+            ) as adoption_filter,
+            patch(
+                "mod_refugio.views.render",
+                return_value=HttpResponse("requests"),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 200)
+        adoption_filter.assert_called_once_with(
+            id_estado__tipo_estado="Solicitud",
+        )
+        self.assertTrue(
+            render_mock.call_args.args[2]["puede_ver_solicitudes_adopcion"]
+        )
+        self.assertFalse(
+            render_mock.call_args.args[2]["puede_gestionar_adopciones"]
+        )
+
+    def test_inactive_staff_sees_requests_but_not_response_controls(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {}
+        solicitud = SimpleNamespace(
+            id_animal=SimpleNamespace(nombre="Luna", especie="Perro"),
+            id_usuario=SimpleNamespace(
+                p_nombre="Ana",
+                s_nombre="",
+                ap_paterno="Prueba",
+                ap_materno="",
+                correo="ana@example.com",
+            ),
+            id_estado=SimpleNamespace(nombre="Pendiente"),
+            fecha_solicitud=date(2026, 10, 30),
+            fecha_respuesta=None,
+            motivo="Quiero darle un hogar",
+            observacion="",
+            respuesta="",
+            respondida_por=None,
+            pk=12,
+        )
+
+        html = render_to_string(
+            "gestion_solicitudes.html",
+            {
+                "solicitudes_voluntariado": [],
+                "solicitudes_adopcion": [solicitud],
+                "puede_ver_solicitudes_adopcion": True,
+                "puede_gestionar_adopciones": False,
+                "solicitud_form": MagicMock(),
+                "personal_form": MagicMock(),
+                "respuesta_adopcion_form": MagicMock(),
+                "filtro_fecha_form": FiltroFechaSolicitudForm(),
+                "es_admin": False,
+                "error": None,
+            },
+            request=request,
+        )
+
+        self.assertIn("Luna", html)
+        self.assertIn("Solo el personal activo puede responder esta solicitud.", html)
+        self.assertNotIn('name="tipo_solicitud" value="adopcion"', html)
 
     def test_anonymous_user_is_redirected_to_login(self):
         request = RequestFactory().get("/refugio/solicitudes/")

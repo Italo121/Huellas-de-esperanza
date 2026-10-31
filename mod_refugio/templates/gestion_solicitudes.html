@@ -2,13 +2,8 @@
 
 {% block content %}
     <main class="requests-page mx-auto">
-        {% include "_account_nav.html" %}
+
         <header class="mb-4">
-            <a class="link-success text-decoration-none small"
-               href="{% url 'inicio_refugio' %}">
-                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>
-                Volver al refugio
-            </a>
             <h1 class="h2 fw-bold mt-3 mb-1">Gestión de solicitudes</h1>
             <p class="text-secondary mb-0">
                 Revisa y responde las solicitudes recibidas por el refugio.
@@ -32,8 +27,7 @@
                     <i class="bi bi-person-hearts me-1" aria-hidden="true"></i>
                     Voluntariado
                 </a>
-                <a class="nav-link"
-                   href="{% url 'mod_adopcion:gestion_solicitudes_adopcion' %}">
+                <a class="nav-link" href="#adopcion">
                     <i class="bi bi-house-heart me-1" aria-hidden="true"></i>
                     Adopción
                 </a>
@@ -292,17 +286,123 @@
 
         <section id="adopcion" class="request-card p-3 p-md-4 mb-4"
                  aria-labelledby="adoption-heading">
-            <h2 class="h5 fw-bold mb-2" id="adoption-heading">
-                <i class="bi bi-house-heart text-success me-2" aria-hidden="true"></i>
-                Solicitudes de adopción
-            </h2>
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-house-heart"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="adoption-heading">
+                        Solicitudes de adopción
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Revisa y responde las postulaciones de adopción.
+                    </p>
+                </div>
+            </div>
+
+            {% if not puede_ver_solicitudes_adopcion %}
             <p class="text-secondary mb-0">
-                Revisa y responde las postulaciones de adopción desde su espacio de gestión.
+                Las solicitudes de adopción están disponibles para el personal del refugio.
             </p>
-            <a class="btn btn-outline-success mt-3"
-               href="{% url 'mod_adopcion:gestion_solicitudes_adopcion' %}">
-                Gestionar solicitudes de adopción
-            </a>
+            {% elif solicitudes_adopcion %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_adopcion %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_animal.nombre|default:solicitud.id_animal.especie }}
+                            </h3>
+                            <span class="text-secondary">
+                                {{ solicitud.id_usuario.p_nombre }}
+                                {{ solicitud.id_usuario.s_nombre }}
+                                {{ solicitud.id_usuario.ap_paterno }}
+                                {{ solicitud.id_usuario.ap_materno }}
+                                {% if solicitud.id_usuario.correo %}
+                                · {{ solicitud.id_usuario.correo }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge {% if solicitud.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud.id_estado.nombre == 'Rechazada' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_solicitud|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_respuesta %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_respuesta|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivo</dt>
+                        <dd class="col-md-9">{{ solicitud.motivo|linebreaksbr }}</dd>
+                        {% if solicitud.observacion %}
+                        <dt class="col-md-3">Información adicional</dt>
+                        <dd class="col-md-9">{{ solicitud.observacion|linebreaksbr }}</dd>
+                        {% endif %}
+                        {% if solicitud.respuesta %}
+                        <dt class="col-md-3">Respuesta</dt>
+                        <dd class="col-md-9">{{ solicitud.respuesta|linebreaksbr }}</dd>
+                        {% endif %}
+                    </dl>
+
+                    {% if solicitud.id_estado.nombre == "Pendiente" or solicitud.id_estado.nombre == "En Revisión" %}
+                    {% if puede_gestionar_adopciones %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}#adopcion">
+                        {% csrf_token %}
+                        <input type="hidden" name="tipo_solicitud" value="adopcion">
+                        <input type="hidden" name="solicitud_adopcion_id"
+                               value="{{ solicitud.pk }}">
+                        <div class="mb-3">
+                            <label class="form-label"
+                                   for="respuesta-adopcion-{{ solicitud.pk }}">
+                                Respuesta para la persona solicitante
+                            </label>
+                            <textarea class="form-control"
+                                      name="respuesta"
+                                      id="respuesta-adopcion-{{ solicitud.pk }}"
+                                      rows="2"
+                                      placeholder="Respuesta opcional"></textarea>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 justify-content-end">
+                            <button class="btn btn-outline-danger" type="submit"
+                                    name="action" value="rechazada">
+                                <i class="bi bi-x-circle me-1" aria-hidden="true"></i>
+                                Rechazar
+                            </button>
+                            <button class="btn btn-success" type="submit"
+                                    name="action" value="aprobada">
+                                <i class="bi bi-check-circle me-1" aria-hidden="true"></i>
+                                Aprobar
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo el personal activo puede responder esta solicitud.
+                    </p>
+                    {% endif %}
+                    {% elif solicitud.respondida_por %}
+                    <div class="small text-secondary border-top pt-3">
+                        Respondida por
+                        {{ solicitud.respondida_por.id_usuario.p_nombre }}
+                        {{ solicitud.respondida_por.id_usuario.ap_paterno }}
+                    </div>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                Aún no se han recibido solicitudes de adopción.
+            </p>
+            {% endif %}
         </section>
 
         <section id="hogar-temporal" class="request-card p-3 p-md-4"
