@@ -167,6 +167,12 @@ def solicitar_voluntariado(request):
         .order_by("-fecha_solicitud", "-id_solicitud_vol")
         .first()
     )
+    solicitud_usuario = (
+        SolicitudVoluntariado.objects.filter(id_usuario=usuario)
+        .select_related("id_estado")
+        .order_by("-fecha_solicitud", "-id_solicitud_vol")
+        .first()
+    )
     form = SolicitudVoluntariadoForm()
     error = None
     response_status = 200
@@ -222,6 +228,7 @@ def solicitar_voluntariado(request):
             "form": form,
             "error": error,
             "solicitud_pendiente": solicitud_pendiente,
+            "solicitud_usuario": solicitud_usuario,
             "usuario": usuario,
         },
         status=(
