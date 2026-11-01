@@ -28,4 +28,5 @@ urlpatterns = [
     # Módulo del refugio
     path('refugio/', include('mod_refugio.urls')),
     path('adopcion/', include('mod_adopcion.urls')),
+    path('casa-temporal/',include(('mod_casa_temporal.urls', 'mod_casa_temporal'),namespace='mod_casa_temporal',),),
 ]
