@@ -1,4 +1,5 @@
 from .models import Personal
+from mod_casa_temporal.models import CasaTemporal
 
 
 def personal_context(request):
@@ -10,4 +11,13 @@ def personal_context(request):
             id_usuario__supabase_uid=supabase_uid,
         ).exists()
     )
-    return {"es_personal": es_personal}
+    tiene_hogar_temporal = bool(
+        supabase_uid
+        and CasaTemporal.objects.filter(
+            id_usuario__supabase_uid=supabase_uid,
+        ).exists()
+    )
+    return {
+        "es_personal": es_personal,
+        "tiene_hogar_temporal": tiene_hogar_temporal,
+    }
