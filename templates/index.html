@@ -219,6 +219,12 @@
                         Unirse al refugio
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="{% url 'inicio' %}" class="nav-link text-white">
+                        <i class="bi bi-house-heart-fill me-2"></i>
+                        Animales rescatados
+                    </a>
+                </li>
             </ul>
 
             <!-- Adopciones -->
@@ -233,12 +239,6 @@
                     <a href="{% url 'mod_adopcion:animales_adopcion' %}" class="nav-link text-white">
                         <i class="bi bi-heart-fill me-2"></i>
                         Animales disponibles
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{% url 'mod_adopcion:mis_solicitudes' %}" class="nav-link text-white">
-                        <i class="bi bi-clipboard2-heart me-2"></i>
-                        Mis solicitudes
                     </a>
                 </li>
                 <li class="nav-item">
@@ -258,17 +258,25 @@
 
             <ul class="nav flex-column p-3 pt-2">
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
+                    <a href="{% url 'mod_casa_temporal:hogares_disponibles' %}" class="nav-link text-white">
                         <i class="bi bi-house-check-fill me-2"></i>
                         Hogares disponibles
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
-                        <i class="bi bi-house-add-fill me-2"></i>
-                        Registrar un hogar
+                    <a href="{% url 'mod_casa_temporal:solicitar_hogar_temporal' %}" class="nav-link text-white">
+                        <i class="bi bi-house-heart me-2"></i>
+                        Postular como hogar temporal
                     </a>
                 </li>
+                {% if tiene_hogar_temporal %}
+                <li class="nav-item">
+                    <a href="{% url 'mod_casa_temporal:mis_hogares_temporales' %}" class="nav-link text-white">
+                        <i class="bi bi-house-check me-2"></i>
+                        Mi hogar temporal
+                    </a>
+                </li>
+                {% endif %}
             </ul>
 
             <!-- Donaciones -->
@@ -345,6 +353,12 @@
                     <a href="{% url 'registro_animal' %}" class="nav-link text-white">
                         <i class="bi bi-plus-circle-fill me-2"></i>
                         Registrar un Animal
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}" class="nav-link text-white">
+                        <i class="bi bi-house-add me-2"></i>
+                        Gestión de hogares temporales
                     </a>
                 </li>
 
