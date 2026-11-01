@@ -26,15 +26,55 @@
             Ya formas parte del personal del refugio, por lo que no necesitas
             enviar una solicitud para unirte.
         </div>
-        {% elif solicitud_pendiente %}
+        {% else %}
+        {% if solicitud_usuario %}
+        <section class="card border-0 bg-light mb-4" aria-labelledby="solicitud-enviada-titulo">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <h2 class="h5 fw-bold mb-0" id="solicitud-enviada-titulo">Tu solicitud de voluntariado</h2>
+                    <span class="badge {% if solicitud_usuario.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud_usuario.id_estado.nombre == 'Rechazada' %}text-bg-danger{% elif solicitud_usuario.id_estado.nombre == 'Pendiente' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
+                        {{ solicitud_usuario.id_estado.nombre }}
+                    </span>
+                </div>
+                <p class="text-secondary small">
+                    Enviada el {{ solicitud_usuario.fecha_solicitud|date:"d/m/Y" }}
+                    {% if solicitud_usuario.fecha_respuesta %}
+                    · Respondida el {{ solicitud_usuario.fecha_respuesta|date:"d/m/Y" }}
+                    {% endif %}
+                </p>
+                <dl class="row mb-0">
+                    <dt class="col-md-3">Motivación</dt>
+                    <dd class="col-md-9">{{ solicitud_usuario.motivacion|linebreaksbr }}</dd>
+                    <dt class="col-md-3">Disponibilidad</dt>
+                    <dd class="col-md-9">{{ solicitud_usuario.disponibilidad|linebreaksbr }}</dd>
+                    <dt class="col-md-3">Experiencia</dt>
+                    <dd class="col-md-9">{{ solicitud_usuario.experiencia|linebreaksbr }}</dd>
+                    <dt class="col-md-3">Respuesta del equipo</dt>
+                    <dd class="col-md-9">
+                        {% if solicitud_usuario.observacion %}
+                        {{ solicitud_usuario.observacion|linebreaksbr }}
+                        {% elif solicitud_pendiente %}
+                        <span class="text-secondary">Tu solicitud está pendiente de revisión. Aún no hay una respuesta.</span>
+                        {% else %}
+                        <span class="text-secondary">El equipo aún no ha agregado una respuesta.</span>
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if solicitud_pendiente %}
         <div class="alert alert-info" role="status">
-            Ya recibimos tu solicitud del
-            {{ solicitud_pendiente.fecha_solicitud|date:"d/m/Y" }}.
-            Se encuentra pendiente de revisión; te informaremos cuando haya una respuesta.
+            No puedes enviar otra solicitud mientras esta se encuentre pendiente de revisión.
         </div>
         {% elif form %}
         <p class="text-secondary">
+            {% if solicitud_usuario %}
+            Puedes enviar una nueva solicitud.
+            {% else %}
             Hola {{ usuario.p_nombre }}. Completa este formulario para postular.
+            {% endif %}
             El equipo del refugio revisará tu solicitud.
         </p>
 
@@ -61,6 +101,7 @@
                 Enviar solicitud
             </button>
         </form>
+        {% endif %}
         {% endif %}
     </main>
 {% endblock %}
