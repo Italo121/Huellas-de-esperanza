@@ -332,7 +332,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
                 "mod_adopcion.views.transaction.atomic",
                 return_value=nullcontext(),
             ),
-            patch("mod_adopcion.views.messages.success"),
+            patch("mod_adopcion.views.messages.success") as success_mock,
         ):
             animal_lock.return_value.get.return_value = animal
             filter_mock.return_value.exists.return_value = False
@@ -342,7 +342,11 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             response = solicitar_adopcion(request, animal_id=7)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("mod_adopcion:detalle_animal", args=(7,)))
+        self.assertEqual(response.url, reverse("mod_adopcion:mis_solicitudes"))
+        success_mock.assert_called_once_with(
+            request,
+            "Tu solicitud de adopción fue enviada. El refugio la revisará.",
+        )
         create_mock.assert_called_once_with(
             id_animal=animal,
             id_usuario=usuario,

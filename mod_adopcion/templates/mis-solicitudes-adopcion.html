@@ -4,6 +4,13 @@
 
 {% block content %}
 <div class="container-fluid p-3 p-lg-4">
+    {% for message in messages %}
+        <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% else %}alert-success{% endif %}"
+             role="status">
+            {{ message }}
+        </div>
+    {% endfor %}
+
     <div class="mb-4">
         <span class="text-success fw-semibold small text-uppercase">
             Adopciones

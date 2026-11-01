@@ -401,4 +401,4 @@ def solicitar_adopcion(request, animal_id):
         request,
         "Tu solicitud de adopción fue enviada. El refugio la revisará.",
     )
-    return redirect(detalle_url)
+    return redirect("mod_adopcion:mis_solicitudes")
