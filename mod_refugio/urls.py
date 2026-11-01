@@ -4,19 +4,13 @@ from django.views.generic import RedirectView
 from . import views
 
 urlpatterns = [
-    path("", views.informacion_refugio, name="inicio_refugio"),
+    path("", views.inicio, name="inicio_refugio"),
     path("informacion/", views.informacion_refugio, name="informacion_refugio"),
     path("refugio/",RedirectView.as_view(pattern_name="informacion_refugio",permanent=False,)
          ,name="informacion_refugio_alias",),
-    path(
-        "solicitud-voluntariado/",
-        views.solicitar_voluntariado,
-        name="solicitar_voluntariado",
+    path("solicitud-voluntariado/",views.solicitar_voluntariado,name="solicitar_voluntariado",
     ),
-    path(
-        "solicitudes/",
-        views.gestion_solicitudes,
-        name="gestion_solicitudes",
+    path("solicitudes/",views.gestion_solicitudes,name="gestion_solicitudes",
     ),
     path("salud-animal/", views.gestion_salud_animal, name="gestion_salud_animal"),
     path("vacunas/", views.gestion_vacunas, name="gestion_vacunas"),
