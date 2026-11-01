@@ -41,7 +41,7 @@ def animales_adopcion(request):
     )
     return render(
         request,
-        "animales-adopcion.html",
+        "catalogo-animales-adopcion.html",
         {
             "animales": animales,
             "especies": especies,
@@ -55,6 +55,12 @@ def detalle_animal(request, id_animal):
     )
     session_user = request.session.get("refugio_usuario") or {}
     supabase_uid = session_user.get("id")
+    puede_editar = bool(
+        supabase_uid
+        and Personal.objects.filter(
+            id_usuario__supabase_uid=supabase_uid
+        ).exists()
+    )
     solicitud_existente = None
     solicitud_rechazada = None
     if supabase_uid:
@@ -88,6 +94,7 @@ def detalle_animal(request, id_animal):
             "solicitud_existente": solicitud_existente,
             "solicitud_rechazada": solicitud_rechazada,
             "solicitud_form": SolicitudAdopcionForm(),
+            "puede_editar": puede_editar,
         },
     )
 
@@ -252,6 +259,30 @@ def mis_adopciones(request):
         {
             "adopciones": adopciones,
         }
+    )
+
+
+def mis_solicitudes(request):
+    session_user = request.session.get("refugio_usuario") or {}
+    supabase_uid = session_user.get("id")
+
+    if not supabase_uid:
+        return redirect_to_login(
+            request.get_full_path(),
+            login_url=resolve_url("login_usuario"),
+        )
+
+    solicitudes = (
+        SolicitudAdopcion.objects
+        .filter(id_usuario__supabase_uid=supabase_uid)
+        .select_related("id_animal", "id_estado")
+        .order_by("-fecha_solicitud", "-id_solicitud_adopcion")
+    )
+
+    return render(
+        request,
+        "mis-solicitudes-adopcion.html",
+        {"solicitudes": solicitudes},
     )
 
 

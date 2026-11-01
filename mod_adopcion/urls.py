@@ -23,6 +23,11 @@ urlpatterns = [
         name="mis_adopciones"
     ),
     path(
+        "mis-solicitudes/",
+        views.mis_solicitudes,
+        name="mis_solicitudes"
+    ),
+    path(
         "solicitar/<int:animal_id>/",
         views.solicitar_adopcion,
         name="solicitar_adopcion"

@@ -2,313 +2,691 @@
 {% extends "index.html" %}
 
 {% block content %}
-<section id="animales" aria-labelledby="catalog-title">
 
-    <!-- Encabezado -->
-    <div class="d-flex flex-wrap justify-content-between
-                align-items-end gap-3 mb-4">
-        <div>
-            <span class="text-success fw-semibold small text-uppercase">
-                Adopciones
-            </span>
-            <h2 class="fw-bold mt-1 mb-1" id="catalog-title">
-                ¡Animales disponibles! 🐾
-            </h2>
-            <p class="text-secondary mb-0">
-                Conoce a quienes están esperando una familia.
-            </p>
+<div class="p-3 p-lg-4">
+
+    <!-- MENSAJES -->
+    {% for message in messages %}
+        <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% else %}alert-success{% endif %}"
+             role="status">
+            {{ message }}
         </div>
+    {% endfor %}
 
-        <span class="badge rounded-pill text-bg-success fs-6 px-3 py-2"
-              id="result-count">
-            {{ animales|length }} animales
+    {% if error %}
+        <div class="alert alert-danger" role="alert">
+            {{ error }}
+        </div>
+    {% endif %}
+
+    {% if solicitud_rechazada %}
+        <div class="alert alert-warning" role="status">
+            Tu solicitud anterior fue rechazada.
+
+            {% if solicitud_rechazada.respuesta %}
+                <div class="mt-1">
+                    {{ solicitud_rechazada.respuesta|linebreaksbr }}
+                </div>
+            {% endif %}
+
+            Puedes enviar una nueva solicitud si todavía deseas postular.
+        </div>
+    {% endif %}
+
+
+    <!-- VOLVER -->
+    <a href="{% url 'mod_adopcion:animales_adopcion' %}"
+       class="btn btn-outline-secondary mb-4">
+
+        <i class="bi bi-arrow-left me-2"></i>
+        Volver a animales disponibles
+
+    </a>
+
+
+    <!-- ENCABEZADO -->
+    <div class="mb-4">
+
+        <span class="text-success fw-semibold small text-uppercase">
+            Adopciones
         </span>
+
+        <h2 class="h3 fw-bold mt-1 mb-1">
+            Conoce a tu futuro compañero 🐾
+        </h2>
+
+        <p class="text-secondary mb-0">
+            Descubre su historia, características y encuentra
+            a tu nuevo compañero.
+        </p>
+
     </div>
 
-    <!-- Buscador y filtros -->
-    <div class="card border-0 shadow-sm rounded-4 mb-4">
-        <div class="card-body p-3">
-            <div class="row g-3">
 
-                <div class="col-12 col-md-8">
-                    <label for="animal-search"
-                           class="form-label small fw-semibold">
-                        Buscar animal
-                    </label>
+    <!-- TARJETA PRINCIPAL -->
+    <div class="animal-card mb-4">
 
-                    <div class="input-group">
-                        <span class="input-group-text bg-white">
-                            <i class="bi bi-search"></i>
-                        </span>
-                        <input type="search"
-                               class="form-control"
-                               id="animal-search"
-                               placeholder="Nombre o raza..."
-                               autocomplete="off">
-                    </div>
-                </div>
+        <div class="row g-0">
 
-                <div class="col-12 col-md-4">
-                    <label for="species-filter"
-                           class="form-label small fw-semibold">
-                        Especie
-                    </label>
+            <!-- FOTOGRAFÍA -->
+            <div class="col-12 col-lg-5">
 
-                    <select class="form-select" id="species-filter">
-                        <option value="">Todas las especies</option>
-                        {% for especie in especies %}
-                            <option value="{{ especie|lower }}">
-                                {{ especie|capfirst }}
-                            </option>
-                        {% endfor %}
-                    </select>
-                </div>
-
-            </div>
-        </div>
-    </div>
-
-    <!-- Catálogo -->
-    <div class="row g-4" id="animal-grid">
-
-        {% for animal in animales %}
-
-        <article class="col-12 col-sm-6 col-xl-4 animal-entry"
-                 data-species="{{ animal.especie|lower }}"
-                 data-search="{{ animal.nombre|default:''|lower }} {{ animal.raza.nomb_raza|default:''|lower }} {{ animal.especie|lower }}">
-
-            <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden">
-
-                <!-- Fotografía -->
                 {% if animal.foto_url %}
-                    <img src="{{ animal.foto_url }}"
-                         class="w-100"
-                         style="height:230px; object-fit:cover;"
-                         alt="{{ animal.nombre|default:animal.especie }}"
-                         loading="lazy">
+
+                    <img
+                        src="{{ animal.foto_url }}"
+                        alt="{{ animal.nombre|default:animal.especie }}"
+                        class="w-100 h-100"
+                        style="min-height:350px; max-height:600px;
+                               object-fit:cover;">
+
                 {% else %}
-                    <div class="d-flex flex-column align-items-center
-                                justify-content-center bg-light text-success"
-                         style="height:230px;">
-                        <i class="bi bi-heart-pulse display-3"></i>
-                        <span class="small text-secondary mt-2">
-                            Fotografía no disponible
-                        </span>
+
+                    <div class="photo-fallback h-100"
+                         style="min-height:350px;">
+
+                        <i class="bi bi-heart-pulse"></i>
+
                     </div>
+
                 {% endif %}
 
-                <!-- Información -->
-                <div class="card-body p-4 d-flex flex-column">
+            </div>
 
-                    <div class="d-flex justify-content-between
-                                align-items-center mb-2">
-                        <span class="badge rounded-pill text-bg-success">
+
+            <!-- INFORMACIÓN PRINCIPAL -->
+            <div class="col-12 col-lg-7">
+
+                <div class="p-4 p-lg-5">
+
+                    <div class="d-flex flex-wrap
+                                justify-content-between
+                                align-items-center gap-2 mb-3">
+
+                        <span class="badge rounded-pill species-badge">
                             {{ animal.especie|capfirst }}
                         </span>
 
-                        <small class="text-secondary">
-                            #{{ animal.id_animal }}
-                        </small>
+                        {% if estado_animal %}
+                            <span class="badge rounded-pill bg-success-subtle text-success">
+                                {{ estado_animal.nombre }}
+                            </span>
+                        {% endif %}
+
                     </div>
 
-                    <h3 class="h5 fw-bold mb-1">
-                        {{ animal.nombre|default:"Esperando nombre" }}
-                    </h3>
 
-                    <p class="text-secondary mb-3">
-                        {{ animal.raza.nomb_raza|default:"Raza no identificada" }}
+                    <h1 class="h2 fw-bold mb-1">
+                        {{ animal.nombre|default:"Sin nombre" }}
+                    </h1>
+
+                    <p class="text-secondary fs-5 mb-3">
+                        {{ animal.raza.nomb_raza|default:"Raza no especificada" }}
                     </p>
 
-                    <div class="small mb-3">
-                        <p class="mb-2">
-                            <i class="bi bi-hourglass-split text-success me-2"></i>
+
+                    <hr>
+
+
+                    <!-- CARACTERÍSTICAS -->
+                    <h3 class="h5 fw-bold mb-3">
+                        Información del animal
+                    </h3>
+
+                    <div class="animal-facts mb-4">
+
+                        <span>
+                            <i class="bi bi-hourglass-split me-1"></i>
                             {{ animal.edad_aprox }} años aprox.
-                        </p>
-                        <p class="mb-2">
-                            <i class="bi bi-gender-ambiguous text-success me-2"></i>
+                        </span>
+
+                        <span>
+                            <i class="bi bi-gender-ambiguous me-1"></i>
                             {{ animal.sexo|capfirst }}
-                        </p>
-                        <p class="mb-2">
-                            <i class="bi bi-speedometer2 text-success me-2"></i>
+                        </span>
+
+                        <span>
+                            <i class="bi bi-speedometer2 me-1"></i>
                             {{ animal.peso }} kg
-                        </p>
-                        <p class="mb-0">
+                        </span>
+
+                        <span>
+                            <i class="bi bi-cpu me-1"></i>
+                            {% if animal.microchip %}
+                                Con microchip
+                            {% else %}
+                                Sin microchip
+                            {% endif %}
+                        </span>
+
+                    </div>
+
+
+                    <!-- CONDICIÓN -->
+                    <div class="border-top pt-3 mb-3">
+
+                        <span class="small text-secondary">
+                            Condición actual
+                        </span>
+
+                        <p class="fw-semibold mb-0">
                             <i class="bi bi-heart-pulse text-success me-2"></i>
                             {{ animal.condicion|cut:"_"|capfirst }}
                         </p>
+
                     </div>
 
-                    {% if animal.descripcion %}
-                        <p class="small text-secondary">
-                            {{ animal.descripcion|truncatewords:20 }}
-                        </p>
+
+                    <!-- COMPORTAMIENTO -->
+                    {% if animal.comportamiento %}
+
+                        <div class="mb-3">
+
+                            <span class="small text-secondary">
+                                Comportamiento
+                            </span>
+
+                            <p class="fw-semibold mb-0">
+                                <i class="bi bi-emoji-smile text-success me-2"></i>
+                                {{ animal.comportamiento }}
+                            </p>
+
+                        </div>
+
                     {% endif %}
 
-                    <div class="mt-auto pt-3">
-                        <a href="{% url 'mod_adopcion:detalle_animal' animal.id_animal %}"
-                        class="btn btn-outline-success w-100">
-                            <i class="bi bi-eye me-2"></i>
-                            Ver detalles
-                        </a>
+
+                    <!-- DESCRIPCIÓN -->
+                    <div class="border-top pt-3">
+
+                        <h3 class="h5 fw-bold">
+                            Sobre mí
+                        </h3>
+
+                        <p class="text-secondary mb-0">
+                            {{ animal.descripcion|default:"Aún no hay una descripción registrada." }}
+                        </p>
+
+                    </div>
+
+
+                    <!-- SOLICITAR ADOPCIÓN -->
+                    <div class="mt-4">
+
+                        {% if solicitud_existente %}
+
+                            <button class="btn btn-secondary w-100" disabled>
+
+                                <i class="bi bi-check-circle me-2"></i>
+
+                                Solicitud {{ solicitud_existente.id_estado.nombre|lower }}
+
+                            </button>
+
+                            <p class="text-success small mt-2 mb-0">
+                                Ya tienes una solicitud registrada para este animal.
+                            </p>
+
+                        {% else %}
+
+                            <button
+                                type="button"
+                                class="btn btn-success w-100"
+                                data-bs-toggle="modal"
+                                data-bs-target="#modalAdopcion">
+
+                                <i class="bi bi-heart me-2"></i>
+                                Solicitar adopción
+
+                            </button>
+
+                        {% endif %}
+
                     </div>
 
                 </div>
-            </div>
-        </article>
 
-        {% empty %}
-            <div class="col-12">
-                <div class="text-center bg-white rounded-4 p-5 shadow-sm">
-                    <i class="bi bi-heart display-3 text-success"></i>
-                    <h3 class="h5 mt-3">Todavía no hay animales</h3>
-                    <p class="text-secondary mb-0">
-                        Cuando se registren animales, aparecerán en este catálogo.
-                    </p>
-                </div>
-            </div>
-        {% endfor %}
-
-    </div>
-
-    <div id="no-results"
-         class="alert alert-light border text-center mt-4 d-none"
-         role="status">
-        No encontramos animales con esos filtros.
-    </div>
-
-</section>
-
-<!-- Modal de información -->
-<div class="modal fade" id="animalModal" tabindex="-1"
-     aria-labelledby="animalModalTitle" aria-hidden="true">
-
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content border-0 rounded-4 shadow">
-
-            <div class="modal-header">
-                <h2 class="modal-title fs-5 fw-bold"
-                    id="animalModalTitle">
-                    Ficha del animal
-                </h2>
-                <button type="button" class="btn-close"
-                        data-bs-dismiss="modal"
-                        aria-label="Cerrar"></button>
-            </div>
-
-            <div class="modal-body">
-                <p class="text-secondary" id="modal-description"></p>
-
-                <div class="row g-3">
-                    <div class="col-6">
-                        <small class="text-secondary">Especie</small>
-                        <div id="modal-species" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-6">
-                        <small class="text-secondary">Raza</small>
-                        <div id="modal-breed" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-6">
-                        <small class="text-secondary">Edad aproximada</small>
-                        <div id="modal-age" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-6">
-                        <small class="text-secondary">Sexo</small>
-                        <div id="modal-sex" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-6">
-                        <small class="text-secondary">Peso</small>
-                        <div id="modal-weight" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-6">
-                        <small class="text-secondary">Microchip</small>
-                        <div id="modal-microchip" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-12">
-                        <small class="text-secondary">Condición</small>
-                        <div id="modal-condition" class="fw-semibold"></div>
-                    </div>
-                    <div class="col-12">
-                        <small class="text-secondary">Lugar del rescate</small>
-                        <div id="modal-location" class="fw-semibold"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary"
-                        data-bs-dismiss="modal">
-                    Cerrar
-                </button>
             </div>
 
         </div>
+
     </div>
+
+
+    <!-- INFORMACIÓN COMPLEMENTARIA -->
+    <div class="row g-4">
+
+
+        <!-- VACUNAS -->
+        <div class="col-12">
+
+            <div class="animal-card p-3 p-lg-4">
+
+                <h3 class="h5 fw-bold border-bottom pb-3 mb-3">
+
+                    <i class="bi bi-capsule-pill text-success me-2"></i>
+                    Información de vacunas
+
+                </h3>
+
+                {% if vacunas_animal %}
+
+                    <div class="table-responsive">
+
+                        <table class="table table-hover align-middle mb-0">
+
+                            <thead class="table-light">
+
+                                <tr>
+                                    <th>Vacuna</th>
+                                    <th>Fecha de aplicación</th>
+                                    <th>Próxima dosis</th>
+                                    <th>Estado</th>
+                                    <th>Observaciones</th>
+                                </tr>
+
+                            </thead>
+
+                            <tbody>
+
+                                {% for registro in vacunas_animal %}
+
+                                    <tr>
+
+                                        <th scope="row">
+
+                                            {{ registro.id_vacuna.nomb_vacuna }}
+
+                                            {% if registro.id_vacuna.descripcion %}
+
+                                                <span class="d-block small text-secondary fw-normal">
+                                                    {{ registro.id_vacuna.descripcion }}
+                                                </span>
+
+                                            {% endif %}
+
+                                        </th>
+
+                                        <td>
+
+                                            {% if registro.aplicada %}
+                                                {{ registro.fecha_aplicacion|date:"d/m/Y" }}
+                                            {% else %}
+                                                Programada para {{ registro.fecha_aplicacion|date:"d/m/Y" }}
+                                            {% endif %}
+
+                                        </td>
+
+                                        <td>
+
+                                            {% if registro.fecha_prox_dosis %}
+                                                {{ registro.fecha_prox_dosis|date:"d/m/Y" }}
+                                            {% else %}
+                                                No requiere refuerzo programado
+                                            {% endif %}
+
+                                        </td>
+
+                                        <td>
+
+                                            {% if registro.aplicada %}
+
+                                                <span class="badge text-bg-success">
+                                                    Aplicada
+                                                </span>
+
+                                            {% else %}
+
+                                                <span class="badge text-bg-warning">
+                                                    Pendiente
+                                                </span>
+
+                                            {% endif %}
+
+                                        </td>
+
+                                        <td>
+                                            {{ registro.observacion|default:"Sin observaciones" }}
+                                        </td>
+
+                                    </tr>
+
+                                {% endfor %}
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                {% else %}
+
+                    <div class="empty-state">
+                        <i class="bi bi-capsule display-5"></i>
+
+                        <p class="mt-2 mb-0">
+                            No hay vacunas registradas para este animal.
+                        </p>
+                    </div>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+
+        <!-- INFORMACIÓN DEL RESCATE -->
+        <div class="col-12">
+
+            <div class="animal-card p-3 p-lg-4">
+
+                <h3 class="h5 fw-bold border-bottom pb-3 mb-3">
+
+                    <i class="bi bi-geo-alt text-success me-2"></i>
+                    Historia del rescate
+
+                </h3>
+
+                {% if rescate %}
+
+                    <div class="animal-facts mb-3">
+
+                        <div>
+                            <span class="small text-secondary">
+                                Fecha del rescate
+                            </span>
+
+                            <p class="fw-semibold mb-0">
+                                {{ rescate.fecha_rescate|date:"d/m/Y" }}
+                            </p>
+                        </div>
+
+                        <div>
+                            <span class="small text-secondary">
+                                Lugar
+                            </span>
+
+                            <p class="fw-semibold mb-0">
+                                {{ rescate.lugar_rescate }}
+                            </p>
+                        </div>
+
+                        <div>
+                            <span class="small text-secondary">
+                                Estado del rescate
+                            </span>
+
+                            <p class="fw-semibold mb-0">
+                                {{ rescate.id_estado.nombre }}
+                            </p>
+                        </div>
+
+                        <div>
+                            <span class="small text-secondary">
+                                Condición inicial
+                            </span>
+
+                            <p class="fw-semibold mb-0">
+                                {{ rescate.condicion_inicial|cut:"_"|capfirst }}
+                            </p>
+                        </div>
+
+                    </div>
+
+
+                    {% if rescate.observacion %}
+
+                        <div class="border-top pt-3 mb-3">
+
+                            <span class="small text-secondary">
+                                Observaciones
+                            </span>
+
+                            <p class="mb-0">
+                                {{ rescate.observacion }}
+                            </p>
+
+                        </div>
+
+                    {% endif %}
+
+
+                    {% if rescate.descripcion %}
+
+                        <div class="border-top pt-3">
+
+                            <span class="small text-secondary">
+                                Descripción del rescate
+                            </span>
+
+                            <p class="mb-0">
+                                {{ rescate.descripcion|linebreaksbr }}
+                            </p>
+
+                        </div>
+
+                    {% endif %}
+
+
+                    {% if personal_nombre %}
+
+                        <div class="border-top pt-3 mt-3">
+
+                            <span class="small text-secondary">
+                                Personal responsable
+                            </span>
+
+                            <p class="fw-semibold mb-0">
+                                <i class="bi bi-person-badge text-success me-2"></i>
+                                {{ personal_nombre }}
+                            </p>
+
+                        </div>
+
+                    {% endif %}
+
+                {% else %}
+
+                    <p class="text-secondary mb-0">
+                        No hay información del rescate asociada a este animal.
+                    </p>
+
+                {% endif %}
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- BOTONES INFERIORES -->
+    <div class="d-flex flex-wrap gap-2 mt-4">
+
+        <a class="btn btn-outline-success"
+           href="{% url 'mod_adopcion:animales_adopcion' %}">
+
+            <i class="bi bi-arrow-left me-1"></i>
+            Volver al catálogo
+
+        </a>
+
+        {% if puede_editar %}
+
+            <a class="btn btn-success"
+               href="{% url 'editar_animal' animal.id_animal %}">
+
+                <i class="bi bi-pencil-square me-1"></i>
+                Editar información
+
+            </a>
+
+        {% endif %}
+
+    </div>
+
 </div>
 
+
+<!-- MODAL DE SOLICITUD DE ADOPCIÓN -->
+<div class="modal fade"
+     id="modalAdopcion"
+     tabindex="-1"
+     aria-labelledby="modalAdopcionLabel"
+     aria-hidden="true">
+
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+
+        <div class="modal-content border-0 rounded-4 shadow">
+
+            <div class="modal-header border-0 px-4 pt-4">
+
+                <div>
+
+                    <span class="text-success fw-semibold small text-uppercase">
+                        Solicitud de adopción
+                    </span>
+
+                    <h5 class="modal-title fw-bold mt-1"
+                        id="modalAdopcionLabel">
+
+                        ¡Dale un hogar a {{ animal.nombre|default:"este compañero" }}! 🐾
+
+                    </h5>
+
+                </div>
+
+                <button type="button"
+                        class="btn-close"
+                        data-bs-dismiss="modal"
+                        aria-label="Cerrar">
+                </button>
+
+            </div>
+
+
+            <div class="modal-body px-4">
+
+                <p class="text-secondary">
+                    Completa los siguientes datos para que el refugio
+                    pueda evaluar tu solicitud.
+                </p>
+
+
+                <form method="POST"
+                      action="{% url 'mod_adopcion:solicitar_adopcion' animal.id_animal %}">
+
+                    {% csrf_token %}
+
+
+                    <div class="mb-3">
+
+                        <label for="motivo" class="form-label fw-semibold">
+                            ¿Por qué deseas adoptar a este animal?
+                        </label>
+
+                        <textarea
+                            name="motivo"
+                            id="motivo"
+                            class="form-control"
+                            rows="4"
+                            maxlength="50"
+                            placeholder="Cuéntanos tus motivos..."
+                            required>{{ solicitud_form.motivo.value|default:'' }}</textarea>
+
+                        {% if solicitud_form.motivo.errors %}
+
+                            <div class="small text-danger mt-1">
+                                {{ solicitud_form.motivo.errors|join:", " }}
+                            </div>
+
+                        {% endif %}
+
+                    </div>
+
+
+                    <div class="mb-3">
+
+                        <label for="observacion" class="form-label fw-semibold">
+
+                            Información adicional
+
+                            <span class="text-secondary fw-normal">
+                                (opcional)
+                            </span>
+
+                        </label>
+
+                        <textarea
+                            name="observacion"
+                            id="observacion"
+                            class="form-control"
+                            rows="3"
+                            placeholder="Experiencia cuidando animales, espacio disponible, etc.">{{ solicitud_form.observacion.value|default:'' }}</textarea>
+
+                    </div>
+
+
+                    <div class="alert alert-info rounded-3">
+
+                        <i class="bi bi-info-circle me-2"></i>
+
+                        El refugio revisará tu solicitud.
+                        El envío no significa que la adopción esté aprobada.
+
+                    </div>
+
+
+                    <div class="d-flex justify-content-end gap-2 pb-2">
+
+                        <button type="button"
+                                class="btn btn-outline-secondary"
+                                data-bs-dismiss="modal">
+
+                            Cancelar
+
+                        </button>
+
+                        <button type="submit" class="btn btn-success">
+
+                            <i class="bi bi-send me-2"></i>
+                            Enviar solicitud
+
+                        </button>
+
+                    </div>
+
+                </form>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ABRIR MODAL SI EXISTEN ERRORES EN EL FORMULARIO -->
+{% if solicitud_form.errors %}
+
 <script>
+
 document.addEventListener("DOMContentLoaded", function () {
-    const searchInput = document.getElementById("animal-search");
-    const speciesFilter = document.getElementById("species-filter");
-    const entries = document.querySelectorAll(".animal-entry");
-    const resultCount = document.getElementById("result-count");
-    const noResults = document.getElementById("no-results");
 
-    function filterAnimals() {
-        const search = searchInput.value.trim().toLocaleLowerCase();
-        const species = speciesFilter.value;
-        let visible = 0;
+    const modalElement = document.getElementById("modalAdopcion");
 
-        entries.forEach(function (entry) {
-            const matchesSearch =
-                entry.dataset.search.includes(search);
-            const matchesSpecies =
-                !species || entry.dataset.species === species;
+    if (modalElement) {
 
-            const show = matchesSearch && matchesSpecies;
-            entry.classList.toggle("d-none", !show);
+        bootstrap.Modal.getOrCreateInstance(modalElement).show();
 
-            if (show) visible++;
-        });
-
-        resultCount.textContent =
-            `${visible} animal${visible === 1 ? "" : "es"}`;
-
-        noResults.classList.toggle("d-none", visible !== 0);
     }
 
-    searchInput.addEventListener("input", filterAnimals);
-    speciesFilter.addEventListener("change", filterAnimals);
-
-    const modal = document.getElementById("animalModal");
-
-    modal.addEventListener("show.bs.modal", function (event) {
-        const button = event.relatedTarget;
-        if (!button) return;
-
-        const data = button.dataset;
-
-        document.getElementById("animalModalTitle").textContent =
-            data.name;
-        document.getElementById("modal-description").textContent =
-            data.description;
-        document.getElementById("modal-species").textContent =
-            data.species;
-        document.getElementById("modal-breed").textContent =
-            data.breed;
-        document.getElementById("modal-age").textContent =
-            data.age + " años aprox.";
-        document.getElementById("modal-sex").textContent =
-            data.sex;
-        document.getElementById("modal-weight").textContent =
-            data.weight + " kg";
-        document.getElementById("modal-condition").textContent =
-            data.condition;
-        document.getElementById("modal-location").textContent =
-            data.location;
-        document.getElementById("modal-microchip").textContent =
-            data.microchip;
-    });
 });
+
 </script>
+
+{% endif %}
 
 {% endblock %}

@@ -50,28 +50,6 @@ from .supabase_client import supabase, supabase_storage
 logger = logging.getLogger(__name__)
 
 
-def inicio(request):
-    animales = (
-        Animal.objects.select_related("raza")
-        .order_by("id_animal")
-    )
-
-    especies = (
-        Animal.objects.order_by()
-        .values_list("especie", flat=True)
-        .distinct()
-    )
-
-    return render(
-        request,
-        "index.html",
-        {
-            "animales": animales,
-            "especies": especies,
-        },
-    )
-
-
 def informacion_refugio(request):
     refugio = Refugio.objects.order_by("id_refugio").first()
     coordenadas_validas = False

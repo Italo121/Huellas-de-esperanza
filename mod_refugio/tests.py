@@ -34,6 +34,18 @@ from .models import (
 
 
 class InformacionRefugioTests(SimpleTestCase):
+    def test_refuge_homepage_uses_the_information_view(self):
+        self.assertIs(
+            resolve("/refugio/").func,
+            views.informacion_refugio,
+        )
+
+    def test_root_redirects_to_the_refuge_homepage(self):
+        response = resolve("/").func(RequestFactory().get("/"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("inicio_refugio"))
+
     def test_previous_refuge_url_redirects_to_information_page(self):
         response = resolve("/refugio/refugio/").func(
             RequestFactory().get("/refugio/refugio/")
