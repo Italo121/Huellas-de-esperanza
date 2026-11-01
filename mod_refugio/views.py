@@ -19,6 +19,8 @@ from httpx import ReadTimeout
 from mod_adopcion.forms import RespuestaSolicitudAdopcionForm
 from mod_adopcion.models import Estado as EstadoAdopcion
 from mod_adopcion.models import SolicitudAdopcion
+from mod_casa_temporal.forms import RespuestaSolicitudHogarTemporalForm
+from mod_casa_temporal.models import CasaTemporal, SolicitudHogarTemporal
 
 from .forms import (
     AltaPersonalDesdeSolicitudForm,
@@ -48,6 +50,28 @@ from .models import (
 from .supabase_client import supabase, supabase_storage
 
 logger = logging.getLogger(__name__)
+
+
+def inicio(request):
+    animales = (
+        Animal.objects.select_related("raza")
+        .order_by("id_animal")
+    )
+
+    especies = (
+        Animal.objects.order_by()
+        .values_list("especie", flat=True)
+        .distinct()
+    )
+
+    return render(
+        request,
+        "index.html",
+        {
+            "animales": animales,
+            "especies": especies,
+        },
+    )
 
 
 def informacion_refugio(request):
@@ -265,9 +289,92 @@ def gestion_solicitudes(request):
     personal_form = AltaPersonalDesdeSolicitudForm()
     respuesta_adopcion_form = RespuestaSolicitudAdopcionForm()
     filtro_fecha_form = FiltroFechaSolicitudForm(request.GET or None)
+    respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm()
+    filtro_fecha_hogar_form = FiltroFechaSolicitudForm(
+        request.GET or None,
+        prefix="hogar",
+    )
     error = None
     if request.method == "POST":
-        if request.POST.get("tipo_solicitud") == "adopcion":
+        if request.POST.get("tipo_solicitud") == "hogar_temporal":
+            respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm(request.POST)
+            solicitud_id = request.POST.get("solicitud_hogar_id")
+            if not puede_gestionar_adopciones:
+                error = "Esta sección está disponible para el personal activo del refugio."
+            elif not respuesta_hogar_form.is_valid():
+                error = "Selecciona una acción válida para responder la solicitud."
+            elif not solicitud_id:
+                error = "No se identificó la solicitud que quieres responder."
+            else:
+                try:
+                    with transaction.atomic():
+                        solicitud_hogar = get_object_or_404(
+                            SolicitudHogarTemporal.objects.select_for_update()
+                            .select_related("id_estado"),
+                            pk=solicitud_id,
+                        )
+                        if solicitud_hogar.id_estado.nombre not in {
+                            "Pendiente",
+                            "En Revisión",
+                        }:
+                            error = "Esta solicitud ya fue respondida."
+                        else:
+                            estado_nombre = (
+                                respuesta_hogar_form.cleaned_data["action"]
+                            )
+                            estado_hogar = Estado.objects.filter(
+                                tipo_estado="Solicitud",
+                                nombre=estado_nombre,
+                            ).order_by("id_estado").first()
+                            if estado_hogar is None:
+                                error = (
+                                    "No se encontró el estado para responder la solicitud. "
+                                    "No se realizó ningún cambio."
+                                )
+                                logger.error(
+                                    "Temporary-home request state %s is missing from the database",
+                                    estado_nombre,
+                                )
+                            else:
+                                casa_temporal = get_object_or_404(
+                                    CasaTemporal.objects.select_for_update(),
+                                    pk=solicitud_hogar.id_casa_id,
+                                )
+                                solicitud_hogar.id_estado = estado_hogar
+                                solicitud_hogar.observacion = (
+                                    respuesta_hogar_form.cleaned_data["respuesta"]
+                                    or None
+                                )
+                                solicitud_hogar.fecha_respuesta = timezone.localdate()
+                                solicitud_hogar.rut_personal = personal
+                                solicitud_hogar.save(
+                                    update_fields=(
+                                        "id_estado",
+                                        "observacion",
+                                        "fecha_respuesta",
+                                        "rut_personal",
+                                    )
+                                )
+                                casa_temporal.id_estado = estado_hogar
+                                casa_temporal.save(update_fields=("id_estado",))
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to respond to temporary-home request %s by staff member %s",
+                        solicitud_id,
+                        personal.pk,
+                    )
+                    error = "No pudimos guardar la respuesta. Inténtalo nuevamente."
+                else:
+                    if error is None:
+                        messages.success(
+                            request,
+                            "La solicitud de hogar temporal fue respondida correctamente.",
+                        )
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="hogar-temporal",
+                        )
+        elif request.POST.get("tipo_solicitud") == "adopcion":
             respuesta_adopcion_form = RespuestaSolicitudAdopcionForm(request.POST)
             solicitud_id = request.POST.get("solicitud_adopcion_id")
             if not puede_gestionar_adopciones:
@@ -455,6 +562,29 @@ def gestion_solicitudes(request):
             )
     elif filtro_fecha_form.errors:
         solicitudes_voluntariado = solicitudes_voluntariado.none()
+    solicitudes_hogar_temporal = (
+        SolicitudHogarTemporal.objects.select_related(
+            "id_casa",
+            "id_casa__id_usuario",
+            "id_estado",
+            "rut_personal",
+            "rut_personal__id_usuario",
+        )
+        .order_by("-fecha_solicitud", "-id_solicitud_hog")
+    )
+    if filtro_fecha_hogar_form.is_valid():
+        fecha_desde = filtro_fecha_hogar_form.cleaned_data.get("fecha_desde")
+        fecha_hasta = filtro_fecha_hogar_form.cleaned_data.get("fecha_hasta")
+        if fecha_desde:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
+                fecha_solicitud__gte=fecha_desde
+            )
+        if fecha_hasta:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
+                fecha_solicitud__lte=fecha_hasta
+            )
+    elif filtro_fecha_hogar_form.errors:
+        solicitudes_hogar_temporal = solicitudes_hogar_temporal.none()
     solicitudes_adopcion = SolicitudAdopcion.objects.filter(
         id_estado__tipo_estado="Solicitud",
     ).select_related(
@@ -470,13 +600,16 @@ def gestion_solicitudes(request):
         {
             "solicitudes_voluntariado": solicitudes_voluntariado,
             "solicitudes_adopcion": solicitudes_adopcion,
+            "solicitudes_hogar_temporal": solicitudes_hogar_temporal,
             "solicitud_form": solicitud_form,
             "personal_form": personal_form,
             "respuesta_adopcion_form": respuesta_adopcion_form,
+            "respuesta_hogar_form": respuesta_hogar_form,
             "puede_ver_solicitudes_adopcion": True,
             "puede_gestionar_adopciones": puede_gestionar_adopciones,
             "es_admin": es_admin,
             "filtro_fecha_form": filtro_fecha_form,
+            "filtro_fecha_hogar_form": filtro_fecha_hogar_form,
             "error": error,
             "personal": personal,
         },
@@ -493,24 +626,34 @@ def gestion_solicitudes(request):
                 and request.POST.get("tipo_solicitud") == "adopcion"
                 and error
             )
+            or (
+                request.method == "POST"
+                and request.POST.get("tipo_solicitud") == "hogar_temporal"
+                and error
+            )
             or filtro_fecha_form.errors
+            or filtro_fecha_hogar_form.errors
             else 200
         ),
     )
 
 
-def _redirect_to_filtered_solicitudes(request):
+def _redirect_to_filtered_solicitudes(request, anchor=None):
     query_params = {
         key: value
         for key, value in {
             "fecha_desde": request.POST.get("fecha_desde", ""),
             "fecha_hasta": request.POST.get("fecha_hasta", ""),
+            "hogar-fecha_desde": request.POST.get("hogar-fecha_desde", ""),
+            "hogar-fecha_hasta": request.POST.get("hogar-fecha_hasta", ""),
         }.items()
         if value
     }
     destination = resolve_url("gestion_solicitudes")
     if query_params:
         destination = f"{destination}?{urlencode(query_params)}"
+    if anchor:
+        destination = f"{destination}#{anchor}"
     return redirect(destination)
 
 
