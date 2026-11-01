@@ -1,0 +1,91 @@
+{% extends "index.html" %}
+
+{% block content %}
+<main class="container py-4">
+    <header class="mb-4">
+        <h1 class="h2 fw-bold">Mis hogares temporales</h1>
+        <p class="text-secondary mb-0">
+            Aquí puedes revisar la información de tus hogares y los animales que están a su cuidado.
+        </p>
+    </header>
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+    {% endif %}
+
+    {% if hogares %}
+    <div class="d-flex flex-column gap-4">
+        {% for hogar in hogares %}
+        <section class="card border-0 shadow-sm" aria-labelledby="hogar-{{ hogar.pk }}">
+            <div class="card-body p-4">
+                <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                    <h2 class="h4 fw-bold mb-0" id="hogar-{{ hogar.pk }}">
+                        Hogar temporal {{ forloop.counter }}
+                    </h2>
+                    <span class="badge {% if hogar.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif hogar.id_estado.nombre == 'Rechazada' %}text-bg-danger{% else %}text-bg-warning{% endif %}">
+                        {{ hogar.id_estado.nombre }}
+                    </span>
+                </div>
+
+                <dl class="row mb-4">
+                    <dt class="col-sm-4">Localidad</dt>
+                    <dd class="col-sm-8">{{ hogar.poblacion }}</dd>
+                    <dt class="col-sm-4">Dirección</dt>
+                    <dd class="col-sm-8">{{ hogar.calle }} {{ hogar.num_casa }}</dd>
+                    <dt class="col-sm-4">Personas en el hogar</dt>
+                    <dd class="col-sm-8">{{ hogar.cant_persona }}</dd>
+                    <dt class="col-sm-4">Habitaciones</dt>
+                    <dd class="col-sm-8">{{ hogar.cant_habitacion }}</dd>
+                    <dt class="col-sm-4">Espacio disponible</dt>
+                    <dd class="col-sm-8">{{ hogar.metro_c }} m²</dd>
+                    <dt class="col-sm-4">Patio</dt>
+                    <dd class="col-sm-8">{% if hogar.patio %}Sí{% else %}No{% endif %}</dd>
+                    {% if hogar.evidencia %}
+                    <dt class="col-sm-4">Evidencia registrada</dt>
+                    <dd class="col-sm-8">{{ hogar.evidencia|linebreaksbr }}</dd>
+                    {% endif %}
+                    {% if hogar.observacion %}
+                    <dt class="col-sm-4">Observaciones</dt>
+                    <dd class="col-sm-8">{{ hogar.observacion|linebreaksbr }}</dd>
+                    {% endif %}
+                </dl>
+
+                <h3 class="h5 fw-bold">Animales actualmente asignados</h3>
+                {% if hogar.animales_actuales %}
+                <div class="row g-3">
+                    {% for asignacion in hogar.animales_actuales %}
+                    <div class="col-md-6">
+                        <article class="border rounded-3 p-3 h-100">
+                            <h4 class="h6 fw-bold mb-1">
+                                {{ asignacion.id_animal.nombre|default:asignacion.id_animal.especie }}
+                            </h4>
+                            <p class="small text-secondary mb-1">
+                                {{ asignacion.id_animal.especie|capfirst }}
+                                {% if asignacion.id_animal.sexo %}· {{ asignacion.id_animal.sexo|capfirst }}{% endif %}
+                            </p>
+                            <p class="small mb-0">
+                                En el hogar desde {{ asignacion.fecha_ingreso|date:"d/m/Y" }}
+                            </p>
+                        </article>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-secondary mb-0">
+                    Aún no hay animales asignados a este hogar.
+                </p>
+                {% endif %}
+            </div>
+        </section>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="alert alert-info" role="status">
+        Todavía no tienes un hogar temporal registrado.
+        <a href="{% url 'mod_casa_temporal:solicitar_hogar_temporal' %}">
+            Completar una postulación
+        </a>.
+    </div>
+    {% endif %}
+</main>
+{% endblock %}
