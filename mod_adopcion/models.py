@@ -59,6 +59,32 @@ class SeguimientoAdopcion(models.Model):
         db_table = "seguimiento_adopcion"
 
 
+class DevolucionAdopcion(models.Model):
+    id_dev = models.BigAutoField(primary_key=True)
+    fecha_devolucion = models.DateField()
+    motivo = models.CharField(max_length=50)
+    condicion_animal = models.TextField()
+    observacion = models.TextField(blank=True)
+    requiere_tratamiento = models.BooleanField(default=False)
+    fecha_evaluacion = models.DateField(null=True, blank=True)
+    id_adopcion = models.ForeignKey(
+        Adopcion,
+        on_delete=models.DO_NOTHING,
+        db_column="id_adopcion",
+        related_name="devoluciones",
+    )
+    id_estado = models.ForeignKey(
+        Estado,
+        on_delete=models.DO_NOTHING,
+        db_column="id_estado",
+        related_name="devoluciones_adopcion",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "devolucion_adopcion"
+
+
 class SolicitudAdopcion(models.Model):
     PENDIENTE = "pendiente"
     APROBADA = "aprobada"

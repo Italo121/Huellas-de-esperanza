@@ -1,7 +1,7 @@
 from datetime import date
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.http import HttpResponse
@@ -10,9 +10,13 @@ from django.test import SimpleTestCase
 from django.test import RequestFactory
 from django.urls import resolve, reverse
 
-from .forms import RespuestaSolicitudAdopcionForm, SolicitudAdopcionForm
+from .forms import (
+    RespuestaSolicitudAdopcionForm,
+    SolicitudAdopcionForm,
+    SolicitudDevolucionAdopcionForm,
+)
 from . import views
-from .models import SolicitudAdopcion
+from .models import DevolucionAdopcion, SolicitudAdopcion
 from .views import solicitar_adopcion
 
 
@@ -29,6 +33,18 @@ class SolicitudAdopcionSchemaTests(SimpleTestCase):
         self.assertEqual(
             SolicitudAdopcion._meta.get_field("motivo").max_length,
             50,
+        )
+
+    def test_return_request_model_maps_to_existing_table(self):
+        self.assertEqual(DevolucionAdopcion._meta.db_table, "devolucion_adopcion")
+        self.assertEqual(DevolucionAdopcion._meta.pk.column, "id_dev")
+        self.assertEqual(
+            DevolucionAdopcion._meta.get_field("fecha_devolucion").column,
+            "fecha_devolucion",
+        )
+        self.assertEqual(
+            DevolucionAdopcion._meta.get_field("id_adopcion").column,
+            "id_adopcion",
         )
 
 
@@ -48,6 +64,34 @@ class SolicitudAdopcionFormTests(SimpleTestCase):
 
         self.assertTrue(form.is_valid())
         self.assertEqual(form.cleaned_data["motivo"], "Quiero darle un hogar")
+
+    def test_return_request_requires_reason_and_valid_animal_condition(self):
+        form = SolicitudDevolucionAdopcionForm(
+            {
+                "motivo": "   ",
+                "condicion_animal": "desconocido",
+                "observacion": "",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("motivo", form.errors)
+        self.assertIn("condicion_animal", form.errors)
+
+    def test_return_request_cleans_fields(self):
+        form = SolicitudDevolucionAdopcionForm(
+            {
+                "motivo": " No puedo seguir cuidándolo ",
+                "condicion_animal": "sano",
+                "observacion": "   ",
+                "requiere_tratamiento": "on",
+            }
+        )
+
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["motivo"], "No puedo seguir cuidándolo")
+        self.assertEqual(form.cleaned_data["observacion"], "")
+        self.assertTrue(form.cleaned_data["requiere_tratamiento"])
 
     def test_staff_response_only_allows_approval_or_rejection(self):
         self.assertTrue(
@@ -76,6 +120,15 @@ class SolicitudAdopcionUrlTests(SimpleTestCase):
 
         self.assertEqual(path, "/adopcion/solicitar/7/")
         self.assertIs(resolve(path).func, solicitar_adopcion)
+
+    def test_return_route_resolves_to_request_view(self):
+        path = reverse(
+            "mod_adopcion:solicitar_devolucion",
+            kwargs={"id_adopcion": 7},
+        )
+
+        self.assertEqual(path, "/adopcion/mis-adopciones/7/devolver/")
+        self.assertIs(resolve(path).func, views.solicitar_devolucion)
 
 
 class SeguimientoAdopcionAccessTests(SimpleTestCase):
@@ -145,6 +198,177 @@ class SeguimientoAdopcionAccessTests(SimpleTestCase):
 
 
 class SolicitudAdopcionViewTests(SimpleTestCase):
+    def test_my_adoptions_renders_return_request_form_for_active_adoption(self):
+        request = RequestFactory().get("/adopcion/mis-adopciones/")
+        request.session = {}
+        request.user = AnonymousUser()
+        adopcion = SimpleNamespace(
+            id_adopcion=7,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_termino=None,
+            id_animal=SimpleNamespace(
+                nombre="Luna",
+                especie="perro",
+                foto_url="",
+            ),
+        )
+
+        content = render_to_string(
+            "mis-adopciones.html",
+            {
+                "adopciones": [adopcion],
+                "devoluciones_solicitadas": set(),
+            },
+            request=request,
+        )
+
+        self.assertIn('data-bs-target="#devolucionModal7"', content)
+        self.assertIn('action="/adopcion/mis-adopciones/7/devolver/"', content)
+        self.assertIn('name="condicion_animal"', content)
+        self.assertIn('name="requiere_tratamiento"', content)
+        self.assertIn('name="csrfmiddlewaretoken"', content)
+        self.assertIn("La adopción seguirá activa", content)
+
+    def test_existing_return_request_hides_request_button(self):
+        request = RequestFactory().get("/adopcion/mis-adopciones/")
+        request.session = {}
+        request.user = AnonymousUser()
+        adopcion = SimpleNamespace(
+            id_adopcion=7,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_termino=None,
+            id_animal=SimpleNamespace(
+                nombre="Luna",
+                especie="perro",
+                foto_url="",
+            ),
+        )
+
+        content = render_to_string(
+            "mis-adopciones.html",
+            {
+                "adopciones": [adopcion],
+                "devoluciones_solicitadas": {7},
+            },
+            request=request,
+        )
+
+        self.assertNotIn('data-bs-target="#devolucionModal7"', content)
+        self.assertIn("Solicitud de devolución registrada", content)
+
+    def test_return_request_requires_login(self):
+        request = RequestFactory().post("/adopcion/mis-adopciones/7/devolver/")
+        request.session = {}
+
+        response = views.solicitar_devolucion(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login_usuario"), response.url)
+
+    def test_return_request_rejects_get_requests(self):
+        request = RequestFactory().get("/adopcion/mis-adopciones/7/devolver/")
+
+        response = views.solicitar_devolucion(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_return_request_creates_record_without_ending_adoption(self):
+        request = RequestFactory().post(
+            "/adopcion/mis-adopciones/7/devolver/",
+            {
+                "motivo": "No puedo seguir cuidándolo",
+                "condicion_animal": "sano",
+                "observacion": "Se encuentra bien",
+                "requiere_tratamiento": "on",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "user-uuid"}}
+        adopcion = SimpleNamespace(
+            id_adopcion=7,
+            id_animal_id=3,
+            fecha_termino=None,
+            save=Mock(),
+        )
+        state = SimpleNamespace(pk=11)
+
+        with (
+            patch("mod_adopcion.views.Adopcion.objects.select_for_update") as lock_adoption,
+            patch(
+                "mod_adopcion.views.get_object_or_404",
+                return_value=adopcion,
+            ) as adoption_lookup,
+            patch("mod_adopcion.views.DevolucionAdopcion.objects.filter") as return_filter,
+            patch("mod_adopcion.views.Estado.objects.filter") as state_filter,
+            patch("mod_adopcion.views.DevolucionAdopcion.objects.create") as create_mock,
+            patch("mod_adopcion.views.transaction.atomic", return_value=nullcontext()),
+            patch("mod_adopcion.views.messages.success") as success_mock,
+            patch("mod_adopcion.views.messages.error") as error_mock,
+        ):
+            return_filter.return_value.exists.return_value = False
+            state_filter.return_value.order_by.return_value.first.return_value = state
+
+            response = views.solicitar_devolucion(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("mod_adopcion:mis_adopciones"))
+        error_mock.assert_not_called()
+        success_mock.assert_called_once()
+        self.assertEqual(lock_adoption.call_count, 1)
+        self.assertEqual(
+            adoption_lookup.call_args.kwargs,
+            {
+                "id_adopcion": 7,
+                "id_usuario__supabase_uid": "user-uuid",
+                "fecha_termino__isnull": True,
+            },
+        )
+        state_filter.assert_called_once_with(
+            tipo_estado="Devolucion",
+            nombre="Registrada",
+        )
+        create_mock.assert_called_once_with(
+            fecha_devolucion=views.timezone.localdate(),
+            motivo="No puedo seguir cuidándolo",
+            condicion_animal="sano",
+            observacion="Se encuentra bien",
+            requiere_tratamiento=True,
+            fecha_evaluacion=None,
+            id_adopcion=adopcion,
+            id_estado=state,
+        )
+        self.assertIsNone(adopcion.fecha_termino)
+        adopcion.save.assert_not_called()
+
+    def test_return_request_cannot_be_submitted_twice(self):
+        request = RequestFactory().post(
+            "/adopcion/mis-adopciones/7/devolver/",
+            {
+                "motivo": "No puedo seguir cuidándolo",
+                "condicion_animal": "sano",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "user-uuid"}}
+        adopcion = SimpleNamespace(id_adopcion=7, fecha_termino=None)
+
+        with (
+            patch("mod_adopcion.views.get_object_or_404", return_value=adopcion),
+            patch(
+                "mod_adopcion.views.DevolucionAdopcion.objects.filter"
+            ) as return_filter,
+            patch("mod_adopcion.views.Estado.objects.filter") as state_filter,
+            patch("mod_adopcion.views.DevolucionAdopcion.objects.create") as create_mock,
+            patch("mod_adopcion.views.transaction.atomic", return_value=nullcontext()),
+            patch("mod_adopcion.views.messages.info") as info_mock,
+        ):
+            return_filter.return_value.exists.return_value = True
+
+            response = views.solicitar_devolucion(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 302)
+        state_filter.assert_not_called()
+        create_mock.assert_not_called()
+        info_mock.assert_called_once()
+
     def test_animal_detail_only_enables_editing_for_personal(self):
         animal = SimpleNamespace(pk=7)
         request = RequestFactory().get("/adopcion/animales/7/")

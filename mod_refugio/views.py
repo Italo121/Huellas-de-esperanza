@@ -17,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from httpx import ReadTimeout
 from mod_adopcion.forms import RespuestaSolicitudAdopcionForm
+from mod_adopcion.models import Adopcion
 from mod_adopcion.models import Estado as EstadoAdopcion
 from mod_adopcion.models import SolicitudAdopcion
 
@@ -310,6 +311,13 @@ def gestion_solicitudes(request):
                                     estado_nombre,
                                 )
                             else:
+                                if estado_nombre == "Aprobada":
+                                    Adopcion.objects.create(
+                                        id_animal=solicitud_adopcion.id_animal,
+                                        id_usuario=solicitud_adopcion.id_usuario,
+                                        fecha_inicio=timezone.localdate(),
+                                        fecha_termino=None,
+                                    )
                                 solicitud_adopcion.id_estado = estado_adopcion
                                 solicitud_adopcion.respuesta = (
                                     respuesta_adopcion_form.cleaned_data["respuesta"]

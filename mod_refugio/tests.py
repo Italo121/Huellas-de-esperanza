@@ -397,6 +397,8 @@ class GestionSolicitudesTests(SimpleTestCase):
         request.session = {"refugio_usuario": {"id": "staff-user"}}
         personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
         solicitud = SimpleNamespace(
+            id_animal=SimpleNamespace(pk=7),
+            id_usuario=SimpleNamespace(pk=3),
             id_estado=SimpleNamespace(nombre="Pendiente"),
             save=MagicMock(),
         )
@@ -414,6 +416,7 @@ class GestionSolicitudesTests(SimpleTestCase):
             patch(
                 "mod_refugio.views.EstadoAdopcion.objects.filter"
             ) as estado_filter,
+            patch("mod_refugio.views.Adopcion.objects.create") as adoption_create,
             patch(
                 "mod_refugio.views.get_object_or_404",
                 return_value=solicitud,
@@ -435,6 +438,12 @@ class GestionSolicitudesTests(SimpleTestCase):
         self.assertIs(solicitud.id_estado, estado_aprobado)
         self.assertEqual(solicitud.respuesta, "Aprobada")
         self.assertEqual(solicitud.respondida_por, personal)
+        adoption_create.assert_called_once_with(
+            id_animal=solicitud.id_animal,
+            id_usuario=solicitud.id_usuario,
+            fecha_inicio=views.timezone.localdate(),
+            fecha_termino=None,
+        )
         solicitud.save.assert_called_once_with(
             update_fields=(
                 "id_estado",
