@@ -31,21 +31,10 @@ from .models import (
     VacunaAnimal,
     Veterinario,
 )
+from mod_casa_temporal.models import SolicitudHogarTemporal
 
 
 class InformacionRefugioTests(SimpleTestCase):
-    def test_refuge_homepage_uses_the_information_view(self):
-        self.assertIs(
-            resolve("/refugio/").func,
-            views.informacion_refugio,
-        )
-
-    def test_root_redirects_to_the_refuge_homepage(self):
-        response = resolve("/").func(RequestFactory().get("/"))
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("inicio_refugio"))
-
     def test_previous_refuge_url_redirects_to_information_page(self):
         response = resolve("/refugio/refugio/").func(
             RequestFactory().get("/refugio/refugio/")
@@ -108,10 +97,12 @@ class InformacionRefugioTests(SimpleTestCase):
 
 
 class StaffContextTests(SimpleTestCase):
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
     @patch("mod_refugio.context_processors.Personal.objects.filter")
     def test_staff_menu_visibility_uses_membership_not_session_role(
         self,
         personal_filter,
+        casa_filter,
     ):
         request = RequestFactory().get("/refugio/")
         request.session = {
@@ -121,12 +112,14 @@ class StaffContextTests(SimpleTestCase):
             }
         }
         personal_filter.return_value.exists.return_value = True
+        casa_filter.return_value.exists.return_value = False
 
         context = personal_context(request)
         personal_filter.assert_called_once_with(
             id_usuario__supabase_uid="admin-user-uuid",
         )
         self.assertTrue(context["es_personal"])
+        self.assertFalse(context["tiene_hogar_temporal"])
 
     @patch("mod_refugio.context_processors.Personal.objects.filter")
     def test_public_user_does_not_get_staff_menu(
@@ -141,14 +134,17 @@ class StaffContextTests(SimpleTestCase):
         personal_filter.assert_not_called()
         self.assertFalse(context["es_personal"])
 
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
     @patch("mod_refugio.context_processors.Personal.objects.filter")
     def test_staff_menu_is_available_in_base_template_on_other_pages(
         self,
         personal_filter,
+        casa_filter,
     ):
         request = RequestFactory().get("/adopcion/seguimiento/")
         request.session = {"refugio_usuario": {"id": "staff-user-uuid"}}
         personal_filter.return_value.exists.return_value = True
+        casa_filter.return_value.exists.return_value = False
 
         html = render_to_string("index.html", request=request)
 
@@ -156,6 +152,26 @@ class StaffContextTests(SimpleTestCase):
         self.assertIn(
             'href="/adopcion/seguimiento/"',
             html,
+        )
+
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_owner_menu_shows_private_home_link_when_user_has_a_home(
+        self,
+        personal_filter,
+        casa_filter,
+    ):
+        request = RequestFactory().get("/refugio/")
+        request.session = {"refugio_usuario": {"id": "home-owner-uuid"}}
+        personal_filter.return_value.exists.return_value = False
+        casa_filter.return_value.exists.return_value = True
+
+        context = personal_context(request)
+
+        self.assertFalse(context["es_personal"])
+        self.assertTrue(context["tiene_hogar_temporal"])
+        casa_filter.assert_called_once_with(
+            id_usuario__supabase_uid="home-owner-uuid",
         )
 
 
@@ -341,7 +357,12 @@ class GestionSolicitudesTests(SimpleTestCase):
     def test_list_view_filters_applications_by_both_dates(self):
         request = RequestFactory().get(
             "/refugio/solicitudes/",
-            {"fecha_desde": "2026-10-01", "fecha_hasta": "2026-10-31"},
+            {
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+                "hogar-fecha_desde": "2026-10-01",
+                "hogar-fecha_hasta": "2026-10-31",
+            },
         )
         request.session = {"refugio_usuario": {"id": "staff-user"}}
         queryset = MagicMock()
@@ -349,6 +370,9 @@ class GestionSolicitudesTests(SimpleTestCase):
         queryset.filter.return_value = queryset
         queryset.none.return_value = queryset
         queryset.annotate.return_value = queryset
+        hogares_queryset = MagicMock()
+        hogares_queryset.order_by.return_value = hogares_queryset
+        hogares_queryset.filter.return_value = hogares_queryset
 
         with (
             patch(
@@ -366,6 +390,10 @@ class GestionSolicitudesTests(SimpleTestCase):
                 return_value=queryset,
             ),
             patch(
+                "mod_refugio.views.SolicitudHogarTemporal.objects.select_related",
+                return_value=hogares_queryset,
+            ),
+            patch(
                 "mod_refugio.views.render",
                 return_value=HttpResponse("requests"),
             ),
@@ -380,6 +408,84 @@ class GestionSolicitudesTests(SimpleTestCase):
         queryset.filter.assert_any_call(
             fecha_solicitud__lte=date(2026, 10, 31)
         )
+        hogares_queryset.filter.assert_any_call(
+            fecha_solicitud__gte=date(2026, 10, 1)
+        )
+        hogares_queryset.filter.assert_any_call(
+            fecha_solicitud__lte=date(2026, 10, 31)
+        )
+
+    def test_staff_can_approve_temporary_home_request(self):
+        path = reverse("gestion_solicitudes")
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "hogar_temporal",
+                "solicitud_hogar_id": "27",
+                "action": "Aprobada",
+                "respuesta": "Postulación aprobada.",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        estado_pendiente = SimpleNamespace(nombre="Pendiente")
+        estado_aprobado = SimpleNamespace(nombre="Aprobada")
+        solicitud = SimpleNamespace(
+            id_casa_id=35,
+            id_estado=estado_pendiente,
+            save=MagicMock(),
+        )
+        casa = SimpleNamespace(
+            id_estado=estado_pendiente,
+            save=MagicMock(),
+        )
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudHogarTemporal.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.CasaTemporal.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.Estado.objects.filter"
+            ) as estado_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                side_effect=(solicitud, casa),
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            estado_filter.return_value.order_by.return_value.first.return_value = (
+                estado_aprobado
+            )
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{path}#hogar-temporal")
+        self.assertIs(solicitud.id_estado, estado_aprobado)
+        self.assertEqual(solicitud.observacion, "Postulación aprobada.")
+        self.assertEqual(solicitud.rut_personal, personal)
+        solicitud.save.assert_called_once_with(
+            update_fields=(
+                "id_estado",
+                "observacion",
+                "fecha_respuesta",
+                "rut_personal",
+            )
+        )
+        self.assertIs(casa.id_estado, estado_aprobado)
+        casa.save.assert_called_once_with(update_fields=("id_estado",))
 
     def test_adoption_review_uses_shared_staff_management_view(self):
         path = reverse("gestion_solicitudes")

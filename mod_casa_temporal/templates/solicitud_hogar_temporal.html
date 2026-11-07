@@ -1,0 +1,87 @@
+{% extends "index.html" %}
+
+{% block content %}
+<main class="application-card bg-white p-4 p-md-5 my-3">
+    <div class="text-center mb-4">
+        <div class="brand-icon mb-3" aria-hidden="true">
+            <i class="bi bi-house-heart"></i>
+        </div>
+        <h1 class="h3 fw-bold mb-1">Postular como hogar temporal</h1>
+        <p class="text-secondary mb-0">
+            Cuéntanos sobre tu hogar y por qué quieres colaborar con el refugio.
+        </p>
+    </div>
+
+    {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}"
+         role="status">{{ message }}</div>
+    {% endfor %}
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+    {% endif %}
+
+    {% if solicitud_usuario %}
+    <section class="card border-0 bg-light mb-4" aria-labelledby="solicitud-enviada-titulo">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h2 class="h5 fw-bold mb-0" id="solicitud-enviada-titulo">Tu última postulación</h2>
+                <span class="badge {% if solicitud_usuario.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud_usuario.id_estado.nombre == 'Rechazada' %}text-bg-danger{% elif solicitud_usuario.id_estado.nombre == 'Pendiente' %}text-bg-warning{% else %}text-bg-primary{% endif %}">
+                    {{ solicitud_usuario.id_estado.nombre }}
+                </span>
+            </div>
+            <p class="text-secondary small">
+                Enviada el {{ solicitud_usuario.fecha_solicitud|date:"d/m/Y" }}
+            </p>
+            <dl class="row mb-0">
+                <dt class="col-md-3">Motivo</dt>
+                <dd class="col-md-9">{{ solicitud_usuario.motivo|linebreaksbr }}</dd>
+                <dt class="col-md-3">Domicilio</dt>
+                <dd class="col-md-9">
+                    {{ solicitud_usuario.id_casa.calle }} {{ solicitud_usuario.id_casa.num_casa }},
+                    {{ solicitud_usuario.id_casa.poblacion }}
+                </dd>
+            </dl>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if solicitud_pendiente %}
+    <div class="alert alert-info" role="status">
+        Tu postulación está pendiente de revisión. No puedes enviar otra mientras esté en revisión.
+    </div>
+    {% elif form %}
+    <p class="text-secondary">
+        Hola {{ usuario.p_nombre }}. Los datos de vivienda se guardarán junto con tu solicitud.
+        El equipo del refugio revisará la postulación.
+    </p>
+
+    <form method="post" action="{% url 'mod_casa_temporal:solicitar_hogar_temporal' %}">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+        <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        {% for field in form %}
+        <div class="mb-3 {% if field.name == 'patio' %}form-check{% endif %}">
+            {% if field.name != 'patio' %}
+            <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {% endif %}
+            {{ field }}
+            {% if field.name == 'patio' %}
+            <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {% endif %}
+            {% if field.errors %}
+            <div class="small text-danger mt-1">{{ field.errors|join:", " }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        <button class="btn btn-success btn-lg w-100 mt-2" type="submit">
+            <i class="bi bi-send me-2" aria-hidden="true"></i>
+            Enviar postulación
+        </button>
+    </form>
+    {% endif %}
+</main>
+{% endblock %}
