@@ -288,13 +288,13 @@
 
             <ul class="nav flex-column p-3 pt-2">
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
+                    <a href="{% url 'mod_donacion:necesidades' %}" class="nav-link text-white">
                         <i class="bi bi-box2-heart-fill me-2"></i>
                         Necesidades del refugio
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
+                    <a href="{% url 'mod_donacion:crear_donacion' %}" class="nav-link text-white">
                         <i class="bi bi-gift-fill me-2"></i>
                         Realizar una donación
                     </a>
@@ -359,6 +359,18 @@
                     <a href="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}" class="nav-link text-white">
                         <i class="bi bi-house-add me-2"></i>
                         Gestión de hogares temporales
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{% url 'mod_donacion:crear_necesidad' %}" class="nav-link text-white">
+                        <i class="bi bi-box2-heart me-2"></i>
+                        Registrar necesidad
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="{% url 'mod_donacion:gestion_donaciones' %}" class="nav-link text-white">
+                        <i class="bi bi-gift me-2"></i>
+                        Gestión de donaciones
                     </a>
                 </li>
 
