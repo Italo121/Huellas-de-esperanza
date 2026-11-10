@@ -371,15 +371,21 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
 
     def test_animal_detail_only_enables_editing_for_personal(self):
         animal = SimpleNamespace(pk=7)
+        vacuna = SimpleNamespace(nomb_vacuna="Antirrábica")
+        vacunas_animal = [SimpleNamespace(id_vacuna=vacuna)]
         request = RequestFactory().get("/adopcion/animales/7/")
         request.session = {"refugio_usuario": {"id": "staff-uuid"}}
 
         with (
             patch("mod_adopcion.views.get_object_or_404", return_value=animal),
+            patch(
+                "mod_adopcion.views.VacunaAnimal.objects.select_related"
+            ) as vaccine_query,
             patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
             patch("mod_adopcion.views.SolicitudAdopcion.objects.filter") as request_filter,
             patch("mod_adopcion.views.render", return_value=HttpResponse("detail")) as render_mock,
         ):
+            vaccine_query.return_value.filter.return_value = vacunas_animal
             personal_filter.return_value.exists.return_value = True
             request_filter.return_value.first.return_value = None
 
@@ -387,6 +393,14 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(render_mock.call_args.args[2]["puede_editar"])
+        self.assertEqual(
+            render_mock.call_args.args[2]["vacunas_animal"],
+            vacunas_animal,
+        )
+        vaccine_query.assert_called_once_with("id_vacuna")
+        vaccine_query.return_value.filter.assert_called_once_with(
+            id_animal=animal
+        )
 
     def test_animal_detail_does_not_enable_editing_for_public_user(self):
         animal = SimpleNamespace(pk=7)
@@ -395,10 +409,14 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
 
         with (
             patch("mod_adopcion.views.get_object_or_404", return_value=animal),
+            patch(
+                "mod_adopcion.views.VacunaAnimal.objects.select_related"
+            ) as vaccine_query,
             patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
             patch("mod_adopcion.views.SolicitudAdopcion.objects.filter") as request_filter,
             patch("mod_adopcion.views.render", return_value=HttpResponse("detail")) as render_mock,
         ):
+            vaccine_query.return_value.filter.return_value = []
             personal_filter.return_value.exists.return_value = False
             request_filter.return_value.first.return_value = None
 
