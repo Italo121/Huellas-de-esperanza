@@ -27,6 +27,7 @@ urlpatterns = [
 
     # Módulo del refugio
     path('refugio/', include('mod_refugio.urls')),
+    path('foro/', include('mod_foro.urls')),
     path('adopcion/', include('mod_adopcion.urls')),
     path(
         'donacion/',

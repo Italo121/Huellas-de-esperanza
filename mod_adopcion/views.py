@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from mod_refugio.models import Animal, Personal, Usuario
+from mod_refugio.models import Animal, Personal, Usuario, VacunaAnimal
 
 from .forms import SolicitudAdopcionForm, SolicitudDevolucionAdopcionForm
 from .models import (
@@ -59,6 +59,10 @@ def detalle_animal(request, id_animal):
         Animal,
         id_animal=id_animal
     )
+    vacunas_animal = (
+        VacunaAnimal.objects.select_related("id_vacuna")
+        .filter(id_animal=animal)
+    )
     session_user = request.session.get("refugio_usuario") or {}
     supabase_uid = session_user.get("id")
     puede_editar = bool(
@@ -97,6 +101,7 @@ def detalle_animal(request, id_animal):
         "detalle-animal.html",
         {
             "animal": animal,
+            "vacunas_animal": vacunas_animal,
             "solicitud_existente": solicitud_existente,
             "solicitud_rechazada": solicitud_rechazada,
             "solicitud_form": SolicitudAdopcionForm(),
