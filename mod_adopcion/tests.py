@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import AnonymousUser
+from django.db import models
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
@@ -30,9 +31,9 @@ class SolicitudAdopcionSchemaTests(SimpleTestCase):
             SolicitudAdopcion._meta.get_field("id_estado").column,
             "id_estado",
         )
-        self.assertEqual(
-            SolicitudAdopcion._meta.get_field("motivo").max_length,
-            50,
+        self.assertIsInstance(
+            SolicitudAdopcion._meta.get_field("motivo"),
+            models.TextField,
         )
 
     def test_return_request_model_maps_to_existing_table(self):
@@ -64,6 +65,22 @@ class SolicitudAdopcionFormTests(SimpleTestCase):
 
         self.assertTrue(form.is_valid())
         self.assertEqual(form.cleaned_data["motivo"], "Quiero darle un hogar")
+
+    def test_motivo_accepts_150_characters_and_rejects_more(self):
+        long_motivo = "a" * 150
+        form = SolicitudAdopcionForm({"motivo": long_motivo, "observacion": ""})
+
+        self.assertTrue(form.is_valid())
+        self.assertEqual(len(form.cleaned_data["motivo"]), 150)
+        self.assertFalse(
+            SolicitudAdopcionForm(
+                {"motivo": long_motivo + "a", "observacion": ""}
+            ).is_valid()
+        )
+        self.assertEqual(
+            SolicitudAdopcionForm.base_fields["motivo"].widget.attrs["maxlength"],
+            "150",
+        )
 
     def test_return_request_requires_reason_and_valid_animal_condition(self):
         form = SolicitudDevolucionAdopcionForm(

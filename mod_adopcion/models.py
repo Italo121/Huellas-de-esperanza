@@ -111,7 +111,7 @@ class SolicitudAdopcion(models.Model):
         db_column="id_usuario",
         related_name="solicitudes_adopcion",
     )
-    motivo = models.CharField(max_length=50)
+    motivo = models.TextField()
     observacion = models.CharField(max_length=50, null=True, blank=True)
     id_estado = models.ForeignKey(
         Estado,
