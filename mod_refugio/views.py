@@ -16,8 +16,11 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from httpx import ReadTimeout
-from mod_adopcion.forms import RespuestaSolicitudAdopcionForm
-from mod_adopcion.models import Adopcion
+from mod_adopcion.forms import (
+    RespuestaDevolucionAdopcionForm,
+    RespuestaSolicitudAdopcionForm,
+)
+from mod_adopcion.models import Adopcion, DevolucionAdopcion
 from mod_adopcion.models import Estado as EstadoAdopcion
 from mod_adopcion.models import SolicitudAdopcion
 from mod_casa_temporal.forms import RespuestaSolicitudHogarTemporalForm
@@ -289,6 +292,7 @@ def gestion_solicitudes(request):
     solicitud_form = GestionSolicitudVoluntariadoForm()
     personal_form = AltaPersonalDesdeSolicitudForm()
     respuesta_adopcion_form = RespuestaSolicitudAdopcionForm()
+    respuesta_devolucion_form = RespuestaDevolucionAdopcionForm()
     filtro_fecha_form = FiltroFechaSolicitudForm(request.GET or None)
     respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm()
     filtro_fecha_hogar_form = FiltroFechaSolicitudForm(
@@ -375,6 +379,108 @@ def gestion_solicitudes(request):
                             request,
                             anchor="hogar-temporal",
                         )
+        elif request.POST.get("tipo_solicitud") == "devolucion":
+            respuesta_devolucion_form = RespuestaDevolucionAdopcionForm(
+                request.POST
+            )
+            devolucion_id = request.POST.get("devolucion_id")
+            if not puede_gestionar_adopciones:
+                error = "Esta sección está disponible para el personal activo del refugio."
+            elif not respuesta_devolucion_form.is_valid():
+                error = "Selecciona una acción válida para responder la devolución."
+            elif not devolucion_id:
+                error = "No se identificó la solicitud de devolución que quieres responder."
+            else:
+                try:
+                    with transaction.atomic():
+                        devolucion = get_object_or_404(
+                            DevolucionAdopcion.objects.select_for_update()
+                            .select_related("id_estado"),
+                            pk=devolucion_id,
+                        )
+                        if devolucion.id_estado.nombre != "Registrada":
+                            error = "Esta solicitud de devolución ya fue respondida."
+                        else:
+                            aprobada = (
+                                respuesta_devolucion_form.cleaned_data["action"]
+                                == "aprobada"
+                            )
+                            estado_nombre = "Aprobada" if aprobada else "Rechazada"
+                            estado_devolucion = EstadoAdopcion.objects.filter(
+                                tipo_estado="Devolucion",
+                                nombre=estado_nombre,
+                            ).order_by("id_estado").first()
+                            if estado_devolucion is None:
+                                error = (
+                                    "No se encontró el estado para responder la "
+                                    "devolución. No se realizó ningún cambio."
+                                )
+                                logger.error(
+                                    "Return request state %s is missing from the database",
+                                    estado_nombre,
+                                )
+                            else:
+                                adopcion = Adopcion.objects.select_for_update().get(
+                                    pk=devolucion.id_adopcion_id
+                                )
+                                animal = Animal.objects.select_for_update().get(
+                                    pk=adopcion.id_animal_id
+                                )
+                                if adopcion.fecha_termino is not None:
+                                    error = (
+                                        "La adopción ya fue finalizada y no se puede "
+                                        "responder esta devolución."
+                                    )
+                                else:
+                                    if aprobada:
+                                        estado_disponible = Estado.objects.filter(
+                                            tipo_estado="Animal",
+                                            nombre="Disponible",
+                                        ).order_by("id_estado").first()
+                                        if estado_disponible is None:
+                                            error = (
+                                                "No se encontró el estado Disponible "
+                                                "para el animal. No se realizó ningún cambio."
+                                            )
+                                            logger.error(
+                                                "Available animal state is missing from the database"
+                                            )
+                                        else:
+                                            adopcion.fecha_termino = timezone.localdate()
+                                            adopcion.save(
+                                                update_fields=("fecha_termino",)
+                                            )
+                                            animal.id_estado = estado_disponible.pk
+                                            animal.save(update_fields=("id_estado",))
+
+                                    if error is None:
+                                        devolucion.id_estado = estado_devolucion
+                                        devolucion.fecha_evaluacion = (
+                                            timezone.localdate()
+                                        )
+                                        devolucion.save(
+                                            update_fields=(
+                                                "id_estado",
+                                                "fecha_evaluacion",
+                                            )
+                                        )
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to respond to return request %s by staff member %s",
+                        devolucion_id,
+                        personal.pk,
+                    )
+                    error = "No pudimos guardar la respuesta. Inténtalo nuevamente."
+                else:
+                    if error is None:
+                        messages.success(
+                            request,
+                            "La solicitud de devolución fue respondida correctamente.",
+                        )
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="devolucion",
+                        )
         elif request.POST.get("tipo_solicitud") == "adopcion":
             respuesta_adopcion_form = RespuestaSolicitudAdopcionForm(request.POST)
             solicitud_id = request.POST.get("solicitud_adopcion_id")
@@ -418,27 +524,51 @@ def gestion_solicitudes(request):
                                     estado_nombre,
                                 )
                             else:
-                                if estado_nombre == "Aprobada":
-                                    Adopcion.objects.create(
-                                        id_animal=solicitud_adopcion.id_animal,
-                                        id_usuario=solicitud_adopcion.id_usuario,
-                                        fecha_inicio=timezone.localdate(),
-                                        fecha_termino=None,
-                                    )
-                                solicitud_adopcion.id_estado = estado_adopcion
-                                solicitud_adopcion.respuesta = (
-                                    respuesta_adopcion_form.cleaned_data["respuesta"]
+                                animal = Animal.objects.select_for_update().get(
+                                    pk=solicitud_adopcion.id_animal_id
                                 )
-                                solicitud_adopcion.fecha_respuesta = timezone.localdate()
-                                solicitud_adopcion.respondida_por = personal
-                                solicitud_adopcion.save(
-                                    update_fields=(
-                                        "id_estado",
-                                        "respuesta",
-                                        "fecha_respuesta",
-                                        "respondida_por",
-                                    )
+                                estado_animal_nombre = (
+                                    "Adoptado"
+                                    if estado_nombre == "Aprobada"
+                                    else "Disponible"
                                 )
+                                estado_animal = Estado.objects.filter(
+                                    tipo_estado="Animal",
+                                    nombre=estado_animal_nombre,
+                                ).order_by("id_estado").first()
+                                if estado_animal is None:
+                                    error = (
+                                        f"No se encontró el estado {estado_animal_nombre} "
+                                        "para el animal. No se realizó ningún cambio."
+                                    )
+                                    logger.error(
+                                        "Animal state %s is missing from the database",
+                                        estado_animal_nombre,
+                                    )
+                                else:
+                                    if estado_nombre == "Aprobada":
+                                        Adopcion.objects.create(
+                                            id_animal=solicitud_adopcion.id_animal,
+                                            id_usuario=solicitud_adopcion.id_usuario,
+                                            fecha_inicio=timezone.localdate(),
+                                            fecha_termino=None,
+                                        )
+                                    animal.id_estado = estado_animal.pk
+                                    animal.save(update_fields=("id_estado",))
+                                    solicitud_adopcion.id_estado = estado_adopcion
+                                    solicitud_adopcion.respuesta = (
+                                        respuesta_adopcion_form.cleaned_data["respuesta"]
+                                    )
+                                    solicitud_adopcion.fecha_respuesta = timezone.localdate()
+                                    solicitud_adopcion.respondida_por = personal
+                                    solicitud_adopcion.save(
+                                        update_fields=(
+                                            "id_estado",
+                                            "respuesta",
+                                            "fecha_respuesta",
+                                            "respondida_por",
+                                        )
+                                    )
                 except DatabaseError:
                     logger.exception(
                         "Unable to respond to adoption request %s by staff member %s",
@@ -602,16 +732,28 @@ def gestion_solicitudes(request):
         "respondida_por",
         "respondida_por__id_usuario",
     )
+    solicitudes_devolucion = (
+        DevolucionAdopcion.objects.filter(id_estado__tipo_estado="Devolucion")
+        .select_related(
+            "id_estado",
+            "id_adopcion",
+            "id_adopcion__id_animal",
+            "id_adopcion__id_usuario",
+        )
+        .order_by("-fecha_devolucion")
+    )
     return render(
         request,
         "gestion_solicitudes.html",
         {
             "solicitudes_voluntariado": solicitudes_voluntariado,
             "solicitudes_adopcion": solicitudes_adopcion,
+            "solicitudes_devolucion": solicitudes_devolucion,
             "solicitudes_hogar_temporal": solicitudes_hogar_temporal,
             "solicitud_form": solicitud_form,
             "personal_form": personal_form,
             "respuesta_adopcion_form": respuesta_adopcion_form,
+            "respuesta_devolucion_form": respuesta_devolucion_form,
             "respuesta_hogar_form": respuesta_hogar_form,
             "puede_ver_solicitudes_adopcion": True,
             "puede_gestionar_adopciones": puede_gestionar_adopciones,

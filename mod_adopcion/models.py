@@ -2,6 +2,9 @@ from django.db import models
 from django.utils import timezone
 
 
+ESTADO_ANIMAL_OCULTO_ID = 36
+
+
 class Adopcion(models.Model):
     id_adopcion = models.BigAutoField(primary_key=True)
     id_animal = models.ForeignKey(

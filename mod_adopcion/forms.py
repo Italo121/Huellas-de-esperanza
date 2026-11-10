@@ -3,6 +3,15 @@ from django import forms
 from .models import SolicitudAdopcion
 
 
+class RespuestaDevolucionAdopcionForm(forms.Form):
+    action = forms.ChoiceField(
+        choices=(
+            ("aprobada", "Aprobar"),
+            ("rechazada", "Rechazar"),
+        )
+    )
+
+
 class SolicitudAdopcionForm(forms.Form):
     motivo = forms.CharField(
         max_length=150,
