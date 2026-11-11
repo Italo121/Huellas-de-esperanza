@@ -515,12 +515,15 @@ class GestionSolicitudesTests(SimpleTestCase):
         request.session = {"refugio_usuario": {"id": "staff-user"}}
         personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
         solicitud = SimpleNamespace(
+            id_animal_id=7,
             id_animal=SimpleNamespace(pk=7),
             id_usuario=SimpleNamespace(pk=3),
             id_estado=SimpleNamespace(nombre="Pendiente"),
             save=MagicMock(),
         )
         estado_aprobado = SimpleNamespace(nombre="Aprobada")
+        estado_animal_adoptado = SimpleNamespace(pk=37)
+        animal = SimpleNamespace(id_estado=36, save=MagicMock())
 
         with (
             patch(
@@ -534,6 +537,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             patch(
                 "mod_refugio.views.EstadoAdopcion.objects.filter"
             ) as estado_filter,
+            patch("mod_refugio.views.Estado.objects.filter") as animal_state_filter,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
             patch("mod_refugio.views.Adopcion.objects.create") as adoption_create,
             patch(
                 "mod_refugio.views.get_object_or_404",
@@ -549,6 +556,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             estado_filter.return_value.order_by.return_value.first.return_value = (
                 estado_aprobado
             )
+            animal_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_animal_adoptado
+            )
+            animal_lock.return_value.get.return_value = animal
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
@@ -556,6 +567,8 @@ class GestionSolicitudesTests(SimpleTestCase):
         self.assertIs(solicitud.id_estado, estado_aprobado)
         self.assertEqual(solicitud.respuesta, "Aprobada")
         self.assertEqual(solicitud.respondida_por, personal)
+        self.assertEqual(animal.id_estado, estado_animal_adoptado.pk)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))
         adoption_create.assert_called_once_with(
             id_animal=solicitud.id_animal,
             id_usuario=solicitud.id_usuario,
@@ -570,6 +583,220 @@ class GestionSolicitudesTests(SimpleTestCase):
                 "respondida_por",
             )
         )
+
+    def test_staff_rejection_returns_animal_to_available_state(self):
+        path = reverse("gestion_solicitudes")
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "adopcion",
+                "solicitud_adopcion_id": "11",
+                "action": "rechazada",
+                "respuesta": "No aprobada.",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        solicitud = SimpleNamespace(
+            id_animal_id=7,
+            id_animal=SimpleNamespace(pk=7),
+            id_usuario=SimpleNamespace(pk=3),
+            id_estado=SimpleNamespace(nombre="Pendiente"),
+            save=MagicMock(),
+        )
+        estado_rechazado = SimpleNamespace(nombre="Rechazada")
+        estado_disponible = SimpleNamespace(pk=12)
+        animal = SimpleNamespace(id_estado=36, save=MagicMock())
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as request_state_filter,
+            patch("mod_refugio.views.Estado.objects.filter") as animal_state_filter,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch("mod_refugio.views.Adopcion.objects.create") as adoption_create,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=solicitud,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            request_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_rechazado
+            )
+            animal_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_disponible
+            )
+            animal_lock.return_value.get.return_value = animal
+
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{path}#adopcion")
+        self.assertIs(solicitud.id_estado, estado_rechazado)
+        self.assertEqual(animal.id_estado, estado_disponible.pk)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))
+        adoption_create.assert_not_called()
+
+    def test_staff_can_approve_return_and_restore_animal_availability(self):
+        path = reverse("gestion_solicitudes")
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "devolucion",
+                "devolucion_id": "31",
+                "action": "aprobada",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        devolucion = SimpleNamespace(
+            pk=31,
+            id_estado=SimpleNamespace(nombre="Registrada"),
+            id_adopcion_id=14,
+            save=MagicMock(),
+        )
+        adopcion = SimpleNamespace(
+            id_animal_id=7,
+            fecha_termino=None,
+            save=MagicMock(),
+        )
+        animal = SimpleNamespace(id_estado=37, save=MagicMock())
+        estado_aprobado = SimpleNamespace(nombre="Aprobada")
+        estado_disponible = SimpleNamespace(pk=12)
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.DevolucionAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.Adopcion.objects.select_for_update"
+            ) as adoption_lock,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as return_state_filter,
+            patch("mod_refugio.views.Estado.objects.filter") as animal_state_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=devolucion,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            return_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_aprobado
+            )
+            animal_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_disponible
+            )
+            adoption_lock.return_value.get.return_value = adopcion
+            animal_lock.return_value.get.return_value = animal
+
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{path}#devolucion")
+        self.assertEqual(adopcion.fecha_termino, views.timezone.localdate())
+        adopcion.save.assert_called_once_with(update_fields=("fecha_termino",))
+        self.assertEqual(animal.id_estado, estado_disponible.pk)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))
+        self.assertIs(devolucion.id_estado, estado_aprobado)
+        self.assertEqual(devolucion.fecha_evaluacion, views.timezone.localdate())
+        devolucion.save.assert_called_once_with(
+            update_fields=("id_estado", "fecha_evaluacion")
+        )
+
+    def test_staff_can_reject_return_without_changing_adoption_or_animal(self):
+        request = RequestFactory().post(
+            reverse("gestion_solicitudes"),
+            {
+                "tipo_solicitud": "devolucion",
+                "devolucion_id": "31",
+                "action": "rechazada",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        devolucion = SimpleNamespace(
+            pk=31,
+            id_estado=SimpleNamespace(nombre="Registrada"),
+            id_adopcion_id=14,
+            save=MagicMock(),
+        )
+        adopcion = SimpleNamespace(id_animal_id=7, fecha_termino=None, save=MagicMock())
+        animal = SimpleNamespace(id_estado=37, save=MagicMock())
+        estado_rechazado = SimpleNamespace(nombre="Rechazada")
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.DevolucionAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.Adopcion.objects.select_for_update"
+            ) as adoption_lock,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as return_state_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=devolucion,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            return_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_rechazado
+            )
+            adoption_lock.return_value.get.return_value = adopcion
+            animal_lock.return_value.get.return_value = animal
+
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIs(devolucion.id_estado, estado_rechazado)
+        self.assertIsNone(adopcion.fecha_termino)
+        adopcion.save.assert_not_called()
+        self.assertEqual(animal.id_estado, 37)
+        animal.save.assert_not_called()
 
     def test_inactive_staff_cannot_respond_to_adoption_requests(self):
         request = RequestFactory().post(
@@ -713,6 +940,59 @@ class GestionSolicitudesTests(SimpleTestCase):
         self.assertIn("Luna", html)
         self.assertIn("Solo el personal activo puede responder esta solicitud.", html)
         self.assertNotIn('name="tipo_solicitud" value="adopcion"', html)
+
+    def test_staff_can_review_return_requests_from_management_page(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {}
+        devolucion = SimpleNamespace(
+            pk=31,
+            id_estado=SimpleNamespace(nombre="Registrada"),
+            fecha_devolucion=date(2026, 10, 30),
+            fecha_evaluacion=None,
+            motivo="Cambio de domicilio",
+            condicion_animal="sano",
+            observacion="",
+            requiere_tratamiento=False,
+            id_adopcion=SimpleNamespace(
+                id_animal=SimpleNamespace(nombre="Luna", especie="perro"),
+                id_usuario=SimpleNamespace(
+                    p_nombre="Ana",
+                    s_nombre="",
+                    ap_paterno="Prueba",
+                    ap_materno="",
+                    correo="ana@example.com",
+                ),
+            ),
+        )
+
+        html = render_to_string(
+            "gestion_solicitudes.html",
+            {
+                "solicitudes_voluntariado": [],
+                "solicitudes_adopcion": [],
+                "solicitudes_devolucion": [devolucion],
+                "solicitudes_hogar_temporal": [],
+                "puede_ver_solicitudes_adopcion": True,
+                "puede_gestionar_adopciones": True,
+                "solicitud_form": MagicMock(),
+                "personal_form": MagicMock(),
+                "respuesta_adopcion_form": MagicMock(),
+                "respuesta_devolucion_form": MagicMock(),
+                "respuesta_hogar_form": MagicMock(),
+                "filtro_fecha_form": FiltroFechaSolicitudForm(),
+                "filtro_fecha_hogar_form": FiltroFechaSolicitudForm(),
+                "es_admin": False,
+                "error": None,
+            },
+            request=request,
+        )
+
+        self.assertIn("Solicitudes de devolución", html)
+        self.assertIn("Luna", html)
+        self.assertIn('name="tipo_solicitud" value="devolucion"', html)
+        self.assertIn('name="devolucion_id" value="31"', html)
+        self.assertIn('value="aprobada"', html)
+        self.assertIn('value="rechazada"', html)
 
     def test_anonymous_user_is_redirected_to_login(self):
         request = RequestFactory().get("/refugio/solicitudes/")

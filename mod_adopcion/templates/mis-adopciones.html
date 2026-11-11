@@ -40,7 +40,7 @@
                     {{ adopciones|length }}
                 </h3>
                 <span class="text-secondary">
-                    Adopciones registradas
+                    Registros de adopción
                 </span>
             </div>
         </div>
@@ -81,9 +81,19 @@
 
                         <div class="card-body p-4">
 
+                            {% if adopcion.id_adopcion in devoluciones_aprobadas %}
+                            <span class="badge text-bg-info mb-2">
+                                Devolución aprobada
+                            </span>
+                            {% elif adopcion.fecha_termino %}
+                            <span class="badge text-bg-secondary mb-2">
+                                Adopción finalizada
+                            </span>
+                            {% else %}
                             <span class="badge bg-success mb-2">
                                 Adopción registrada
                             </span>
+                            {% endif %}
 
                             <h4 class="fw-bold mb-1">
                                 {{ adopcion.id_animal.nombre|default:"Sin nombre" }}
@@ -233,10 +243,19 @@
                                         </div>
                                     </div>
                                 </div>
+                            {% elif adopcion.id_adopcion in devoluciones_aprobadas %}
+                                <div class="alert alert-info mb-0" role="status">
+                                    <strong>El refugio aprobó la devolución.</strong>
+                                    El animal fue devuelto al refugio y esta adopción finalizó.
+                                </div>
+                            {% elif adopcion.id_adopcion in devoluciones_rechazadas %}
+                                <div class="alert alert-warning mb-0" role="status">
+                                    La solicitud de devolución fue rechazada. La adopción continúa activa.
+                                </div>
                             {% elif adopcion.id_adopcion in devoluciones_solicitadas %}
                                 <span class="btn btn-outline-secondary w-100 disabled">
                                     <i class="bi bi-hourglass-split me-2"></i>
-                                    Solicitud de devolución registrada
+                                    Solicitud de devolución en revisión
                                 </span>
                             {% endif %}
 
