@@ -35,6 +35,18 @@ from mod_casa_temporal.models import SolicitudHogarTemporal
 
 
 class InformacionRefugioTests(SimpleTestCase):
+    def test_root_url_redirects_to_shelter_information(self):
+        response = resolve("/").func(RequestFactory().get("/"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("informacion_refugio"))
+
+    def test_refuge_home_url_uses_shelter_information_view(self):
+        self.assertIs(
+            resolve("/refugio/").func,
+            views.informacion_refugio,
+        )
+
     def test_previous_refuge_url_redirects_to_information_page(self):
         response = resolve("/refugio/refugio/").func(
             RequestFactory().get("/refugio/refugio/")

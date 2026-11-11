@@ -23,7 +23,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     # Página principal
-    path('', RedirectView.as_view(pattern_name='inicio_refugio', permanent=False),name='inicio',),
+    path('', RedirectView.as_view(pattern_name='informacion_refugio', permanent=False),name='inicio',),
 
     # Módulo del refugio
     path('refugio/', include('mod_refugio.urls')),
