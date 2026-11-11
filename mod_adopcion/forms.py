@@ -5,13 +5,15 @@ from .models import SolicitudAdopcion
 
 class SolicitudAdopcionForm(forms.Form):
     motivo = forms.CharField(
-        max_length=50,
+        min_length=50,
+        max_length=200,
         strip=True,
         widget=forms.Textarea(
             attrs={
                 "class": "form-control",
                 "rows": 4,
-                "maxlength": 50,
+                "minlength": 50,
+                "maxlength": 200,
                 "placeholder": "Cuéntanos tus motivos...",
             }
         ),
