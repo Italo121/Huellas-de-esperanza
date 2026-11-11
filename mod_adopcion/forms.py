@@ -3,15 +3,24 @@ from django import forms
 from .models import SolicitudAdopcion
 
 
+class RespuestaDevolucionAdopcionForm(forms.Form):
+    action = forms.ChoiceField(
+        choices=(
+            ("aprobada", "Aprobar"),
+            ("rechazada", "Rechazar"),
+        )
+    )
+
+
 class SolicitudAdopcionForm(forms.Form):
     motivo = forms.CharField(
-        max_length=50,
+        max_length=150,
         strip=True,
         widget=forms.Textarea(
             attrs={
                 "class": "form-control",
                 "rows": 4,
-                "maxlength": 50,
+                "maxlength": 150,
                 "placeholder": "Cuéntanos tus motivos...",
             }
         ),

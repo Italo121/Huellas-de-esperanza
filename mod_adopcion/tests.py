@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import AnonymousUser
+from django.db import models
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
@@ -30,9 +31,9 @@ class SolicitudAdopcionSchemaTests(SimpleTestCase):
             SolicitudAdopcion._meta.get_field("id_estado").column,
             "id_estado",
         )
-        self.assertEqual(
-            SolicitudAdopcion._meta.get_field("motivo").max_length,
-            50,
+        self.assertIsInstance(
+            SolicitudAdopcion._meta.get_field("motivo"),
+            models.TextField,
         )
 
     def test_return_request_model_maps_to_existing_table(self):
@@ -64,6 +65,22 @@ class SolicitudAdopcionFormTests(SimpleTestCase):
 
         self.assertTrue(form.is_valid())
         self.assertEqual(form.cleaned_data["motivo"], "Quiero darle un hogar")
+
+    def test_motivo_accepts_150_characters_and_rejects_more(self):
+        long_motivo = "a" * 150
+        form = SolicitudAdopcionForm({"motivo": long_motivo, "observacion": ""})
+
+        self.assertTrue(form.is_valid())
+        self.assertEqual(len(form.cleaned_data["motivo"]), 150)
+        self.assertFalse(
+            SolicitudAdopcionForm(
+                {"motivo": long_motivo + "a", "observacion": ""}
+            ).is_valid()
+        )
+        self.assertEqual(
+            SolicitudAdopcionForm.base_fields["motivo"].widget.attrs["maxlength"],
+            "150",
+        )
 
     def test_return_request_requires_reason_and_valid_animal_condition(self):
         form = SolicitudDevolucionAdopcionForm(
@@ -198,6 +215,39 @@ class SeguimientoAdopcionAccessTests(SimpleTestCase):
 
 
 class SolicitudAdopcionViewTests(SimpleTestCase):
+    def test_my_adoptions_includes_return_request_outcome(self):
+        request = RequestFactory().get("/adopcion/mis-adopciones/")
+        request.session = {"refugio_usuario": {"id": "user-uuid"}}
+        adopcion = SimpleNamespace(id_adopcion=7)
+
+        with (
+            patch("mod_adopcion.views.Adopcion.objects.filter") as adoption_filter,
+            patch(
+                "mod_adopcion.views.DevolucionAdopcion.objects.filter"
+            ) as return_filter,
+            patch(
+                "mod_adopcion.views.render",
+                return_value=HttpResponse("adoptions"),
+            ) as render_mock,
+        ):
+            adoption_filter.return_value.select_related.return_value.order_by.return_value = [
+                adopcion
+            ]
+            return_filter.return_value.values_list.return_value = [
+                (7, "Aprobada"),
+                (8, "Rechazada"),
+                (9, "Registrada"),
+            ]
+
+            response = views.mis_adopciones(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = render_mock.call_args.args[2]
+        self.assertEqual(context["devoluciones_solicitadas"], {7, 8, 9})
+        self.assertEqual(context["devoluciones_aprobadas"], {7})
+        self.assertEqual(context["devoluciones_rechazadas"], {8})
+        return_filter.assert_called_once_with(id_adopcion_id__in=[7])
+
     def test_my_adoptions_renders_return_request_form_for_active_adoption(self):
         request = RequestFactory().get("/adopcion/mis-adopciones/")
         request.session = {}
@@ -218,6 +268,8 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             {
                 "adopciones": [adopcion],
                 "devoluciones_solicitadas": set(),
+                "devoluciones_aprobadas": set(),
+                "devoluciones_rechazadas": set(),
             },
             request=request,
         )
@@ -249,12 +301,49 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             {
                 "adopciones": [adopcion],
                 "devoluciones_solicitadas": {7},
+                "devoluciones_aprobadas": set(),
+                "devoluciones_rechazadas": set(),
             },
             request=request,
         )
 
         self.assertNotIn('data-bs-target="#devolucionModal7"', content)
-        self.assertIn("Solicitud de devolución registrada", content)
+        self.assertIn("Solicitud de devolución en revisión", content)
+
+    def test_approved_return_is_shown_as_completed_adoption(self):
+        request = RequestFactory().get("/adopcion/mis-adopciones/")
+        request.session = {}
+        request.user = AnonymousUser()
+        adopcion = SimpleNamespace(
+            id_adopcion=7,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_termino=date(2026, 10, 30),
+            id_animal=SimpleNamespace(
+                nombre="Luna",
+                especie="perro",
+                foto_url="",
+            ),
+        )
+
+        content = render_to_string(
+            "mis-adopciones.html",
+            {
+                "adopciones": [adopcion],
+                "devoluciones_solicitadas": {7},
+                "devoluciones_aprobadas": {7},
+                "devoluciones_rechazadas": set(),
+            },
+            request=request,
+        )
+
+        self.assertIn("Devolución aprobada", content)
+        self.assertIn(
+            "El animal fue devuelto al refugio y esta adopción finalizó.",
+            content,
+        )
+        self.assertIn("30/10/2026", content)
+        self.assertNotIn("Adopción registrada", content)
+        self.assertNotIn('data-bs-target="#devolucionModal7"', content)
 
     def test_return_request_requires_login(self):
         request = RequestFactory().post("/adopcion/mis-adopciones/7/devolver/")
@@ -370,37 +459,63 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
         info_mock.assert_called_once()
 
     def test_animal_detail_only_enables_editing_for_personal(self):
-        animal = SimpleNamespace(pk=7)
+        animal = SimpleNamespace(pk=7, id_estado=21)
+        vacuna = SimpleNamespace(nomb_vacuna="Antirrábica")
+        vacunas_animal = [SimpleNamespace(id_vacuna=vacuna)]
         request = RequestFactory().get("/adopcion/animales/7/")
         request.session = {"refugio_usuario": {"id": "staff-uuid"}}
 
         with (
             patch("mod_adopcion.views.get_object_or_404", return_value=animal),
+            patch(
+                "mod_adopcion.views.VacunaAnimal.objects.select_related"
+            ) as vaccine_query,
             patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
             patch("mod_adopcion.views.SolicitudAdopcion.objects.filter") as request_filter,
+            patch("mod_adopcion.views.Estado.objects.filter") as state_filter,
             patch("mod_adopcion.views.render", return_value=HttpResponse("detail")) as render_mock,
         ):
+            vaccine_query.return_value.filter.return_value = vacunas_animal
             personal_filter.return_value.exists.return_value = True
             request_filter.return_value.first.return_value = None
+            state_filter.return_value.order_by.return_value.first.return_value = (
+                SimpleNamespace(pk=animal.id_estado)
+            )
 
             response = views.detalle_animal(request, id_animal=7)
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(render_mock.call_args.args[2]["puede_editar"])
+        self.assertEqual(
+            render_mock.call_args.args[2]["vacunas_animal"],
+            vacunas_animal,
+        )
+        vaccine_query.assert_called_once_with("id_vacuna")
+        vaccine_query.return_value.filter.assert_called_once_with(
+            id_animal=animal
+        )
 
     def test_animal_detail_does_not_enable_editing_for_public_user(self):
-        animal = SimpleNamespace(pk=7)
+        animal = SimpleNamespace(pk=7, id_estado=21)
         request = RequestFactory().get("/adopcion/animales/7/")
         request.session = {"refugio_usuario": {"id": "public-uuid"}}
 
         with (
             patch("mod_adopcion.views.get_object_or_404", return_value=animal),
+            patch(
+                "mod_adopcion.views.VacunaAnimal.objects.select_related"
+            ) as vaccine_query,
             patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
             patch("mod_adopcion.views.SolicitudAdopcion.objects.filter") as request_filter,
+            patch("mod_adopcion.views.Estado.objects.filter") as state_filter,
             patch("mod_adopcion.views.render", return_value=HttpResponse("detail")) as render_mock,
         ):
+            vaccine_query.return_value.filter.return_value = []
             personal_filter.return_value.exists.return_value = False
             request_filter.return_value.first.return_value = None
+            state_filter.return_value.order_by.return_value.first.return_value = (
+                SimpleNamespace(pk=animal.id_estado)
+            )
 
             response = views.detalle_animal(request, id_animal=7)
 
@@ -465,7 +580,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
 
         content = render_to_string(
             "detalle-animal.html",
-            {"animal": animal},
+            {"animal": animal, "puede_solicitar_adopcion": True},
             request=request,
         )
 
@@ -489,7 +604,11 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
 
         content = render_to_string(
             "detalle-animal.html",
-            {"animal": animal, "solicitud_existente": solicitud},
+            {
+                "animal": animal,
+                "solicitud_existente": solicitud,
+                "puede_solicitar_adopcion": True,
+            },
             request=request,
         )
 
@@ -515,10 +634,16 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
         )
 
         with (
-            patch("mod_adopcion.views.Animal.objects.select_related") as animal_query,
+            patch("mod_adopcion.views.Animal.objects.filter") as animal_query,
             patch("mod_adopcion.views.Animal.objects.order_by") as species_query,
+            patch("mod_adopcion.views.Estado.objects.filter") as state_filter,
         ):
-            animal_query.return_value.order_by.return_value = [animal]
+            state_filter.return_value.order_by.return_value.first.return_value = (
+                SimpleNamespace(pk=21)
+            )
+            animal_query.return_value.select_related.return_value.order_by.return_value = [
+                animal
+            ]
             species_query.return_value.values_list.return_value.distinct.return_value = [
                 "perro"
             ]
@@ -526,6 +651,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             response = views.animales_adopcion(request)
 
         self.assertEqual(response.status_code, 200)
+        animal_query.assert_called_once_with(id_estado=21)
         self.assertContains(response, "Luna")
         self.assertContains(response, 'href="/adopcion/animales/7/"')
 
@@ -538,7 +664,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             },
         )
         request.session = {"refugio_usuario": {"id": "user-uuid"}}
-        animal = SimpleNamespace(pk=7)
+        animal = SimpleNamespace(pk=7, id_estado=9, save=Mock())
         usuario = SimpleNamespace(pk=3)
 
         with (
@@ -579,3 +705,5 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             id_estado=state,
             fecha_solicitud=views.timezone.localdate(),
         )
+        self.assertEqual(animal.id_estado, views.ESTADO_ANIMAL_OCULTO_ID)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))

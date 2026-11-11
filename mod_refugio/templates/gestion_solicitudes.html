@@ -31,6 +31,10 @@
                     <i class="bi bi-house-heart me-1" aria-hidden="true"></i>
                     Adopción
                 </a>
+                <a class="nav-link" href="#devolucion">
+                    <i class="bi bi-arrow-return-left me-1" aria-hidden="true"></i>
+                    Devolución
+                </a>
                 <a class="nav-link" href="#hogar-temporal">
                     <i class="bi bi-house-door me-1" aria-hidden="true"></i>
                     Hogar temporal
@@ -400,6 +404,105 @@
             {% else %}
             <p class="text-secondary mb-0">
                 Aún no se han recibido solicitudes de adopción.
+            </p>
+            {% endif %}
+        </section>
+
+        <section id="devolucion" class="request-card p-3 p-md-4 mb-4"
+                 aria-labelledby="return-heading">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-arrow-return-left"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="return-heading">
+                        Solicitudes de devolución
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Al aprobar una devolución, la adopción finaliza y el animal vuelve a estar disponible.
+                    </p>
+                </div>
+            </div>
+
+            {% if solicitudes_devolucion %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_devolucion %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_adopcion.id_animal.nombre|default:solicitud.id_adopcion.id_animal.especie }}
+                            </h3>
+                            <span class="text-secondary">
+                                {{ solicitud.id_adopcion.id_usuario.p_nombre }}
+                                {{ solicitud.id_adopcion.id_usuario.s_nombre }}
+                                {{ solicitud.id_adopcion.id_usuario.ap_paterno }}
+                                {{ solicitud.id_adopcion.id_usuario.ap_materno }}
+                                {% if solicitud.id_adopcion.id_usuario.correo %}
+                                · {{ solicitud.id_adopcion.id_usuario.correo }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge {% if solicitud.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud.id_estado.nombre == 'Rechazada' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_devolucion|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_evaluacion %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_evaluacion|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivo</dt>
+                        <dd class="col-md-9">{{ solicitud.motivo|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Condición actual</dt>
+                        <dd class="col-md-9">{{ solicitud.condicion_animal|cut:"_"|capfirst }}</dd>
+                        {% if solicitud.observacion %}
+                        <dt class="col-md-3">Observaciones</dt>
+                        <dd class="col-md-9">{{ solicitud.observacion|linebreaksbr }}</dd>
+                        {% endif %}
+                        <dt class="col-md-3">Requiere tratamiento</dt>
+                        <dd class="col-md-9">{% if solicitud.requiere_tratamiento %}Sí{% else %}No{% endif %}</dd>
+                    </dl>
+
+                    {% if solicitud.id_estado.nombre == "Registrada" %}
+                    {% if puede_gestionar_adopciones %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}#devolucion">
+                        {% csrf_token %}
+                        <input type="hidden" name="tipo_solicitud" value="devolucion">
+                        <input type="hidden" name="devolucion_id" value="{{ solicitud.pk }}">
+                        <div class="d-flex flex-wrap gap-2 justify-content-end">
+                            <button class="btn btn-outline-danger" type="submit"
+                                    name="action" value="rechazada">
+                                <i class="bi bi-x-circle me-1" aria-hidden="true"></i>
+                                Rechazar
+                            </button>
+                            <button class="btn btn-success" type="submit"
+                                    name="action" value="aprobada">
+                                <i class="bi bi-check-circle me-1" aria-hidden="true"></i>
+                                Aprobar devolución
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo el personal activo puede responder esta solicitud.
+                    </p>
+                    {% endif %}
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                Aún no se han recibido solicitudes de devolución.
             </p>
             {% endif %}
         </section>
