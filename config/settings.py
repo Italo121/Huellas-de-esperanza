@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     'mod_casa_temporal',
     'mod_donacion',
     'mod_foro',
+    'mod_estadistica_reporte',
 ]
 
 MIDDLEWARE = [

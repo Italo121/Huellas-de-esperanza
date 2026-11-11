@@ -233,40 +233,21 @@
                 </li>
             </ul>
 
-            <!-- Estadísticas y reportes -->
+            <!-- Gestion refugio -->
 
         {% if es_personal %}
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">
-                    Gestion y reportes
+                    Gestion refugio
                 </small>
             </div>
 
             <ul class="nav flex-column p-3 pt-2">
 
                 <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
-                        <i class="bi bi-people-fill me-2"></i>
-                        Personal
-                    </a>
-                </li>
-                <li class="nav-item">
                     <a href="{% url 'gestion_solicitudes' %}" class="nav-link text-white">
                         <i class="bi bi-inbox-fill me-2" aria-hidden="true"></i>
                         Solicitudes
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{% url 'mod_adopcion:seguimiento_adopciones' %}"
-                       class="nav-link text-white">
-                        <i class="bi bi-journal-check me-2" aria-hidden="true"></i>
-                        Seguimiento de adopciones
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link text-white">
-                        <i class="bi bi-bar-chart-line-fill me-2"></i>
-                        Estadísticas
                     </a>
                 </li>
                 <li class="nav-item">
@@ -288,6 +269,14 @@
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="{% url 'mod_adopcion:seguimiento_adopciones' %}"
+                       class="nav-link text-white">
+                        <i class="bi bi-journal-check me-2" aria-hidden="true"></i>
+                        Seguimiento de adopciones
+                    </a>
+                </li>
+
+                <li class="nav-item">
                     <a href="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}" class="nav-link text-white">
                         <i class="bi bi-house-add me-2"></i>
                         Gestión de hogares temporales
@@ -308,6 +297,38 @@
 
             </ul>
         {% endif %}
+            {% if es_admin %}
+            <!-- Estadisticas y reporte -->
+            <div class="px-3 pt-2">
+                <small class="text-white-50 text-uppercase fw-bold">
+                    Estadisticas y reportes
+                </small>
+            </div>
+
+            <ul class="nav flex-column p-3 pt-2 pb-4">
+                <li class="nav-item">
+                    <a href="{% url 'mod_estadistica_reporte:estadisticas' %}" class="nav-link text-white">
+                        <i class="bi bi-chat-square-text-fill me-2"></i>
+                        Estadisticas
+                    </a>
+                </li>
+
+                <li class="nav-item">
+                    <a href="{% url 'mod_estadistica_reporte:personal' %}" class="nav-link text-white">
+                        <i class="bi bi-people-fill me-2"></i>
+                        Personal
+                    </a>
+                </li>
+
+                <li class="nav-item">
+                    <a href="{% url 'mod_estadistica_reporte:inventario_donaciones' %}" class="nav-link text-white">
+                        <i class="bi bi-box2-heart me-2"></i>
+                        Inventario de donaciones
+                    </a>
+                </li>
+            </ul>
+            {% endif %}
+
             <!-- Foro -->
             <div class="px-3 pt-2">
                 <small class="text-white-50 text-uppercase fw-bold">

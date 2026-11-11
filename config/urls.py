@@ -34,4 +34,11 @@ urlpatterns = [
         include(('mod_donacion.urls', 'mod_donacion'), namespace='mod_donacion'),
     ),
     path('casa-temporal/',include(('mod_casa_temporal.urls', 'mod_casa_temporal'),namespace='mod_casa_temporal',),),
+    path(
+        'estadisticas/',
+        include(
+            ('mod_estadistica_reporte.urls', 'mod_estadistica_reporte'),
+            namespace='mod_estadistica_reporte',
+        ),
+    ),
 ]

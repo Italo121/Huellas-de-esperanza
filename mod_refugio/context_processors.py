@@ -5,12 +5,14 @@ from mod_casa_temporal.models import CasaTemporal
 def personal_context(request):
     session_user = request.session.get("refugio_usuario") or {}
     supabase_uid = session_user.get("id")
-    es_personal = bool(
-        supabase_uid
-        and Personal.objects.filter(
-            id_usuario__supabase_uid=supabase_uid,
-        ).exists()
-    )
+    roles_personal = []
+    if supabase_uid:
+        roles_personal = list(
+            Personal.objects.filter(id_usuario__supabase_uid=supabase_uid)
+            .values_list("rol", flat=True)
+        )
+    es_personal = bool(roles_personal)
+    es_admin = "admin" in roles_personal
     tiene_hogar_temporal = bool(
         supabase_uid
         and CasaTemporal.objects.filter(
@@ -19,5 +21,6 @@ def personal_context(request):
     )
     return {
         "es_personal": es_personal,
+        "es_admin": es_admin,
         "tiene_hogar_temporal": tiene_hogar_temporal,
     }

@@ -111,7 +111,7 @@ class InformacionRefugioTests(SimpleTestCase):
 class StaffContextTests(SimpleTestCase):
     @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
     @patch("mod_refugio.context_processors.Personal.objects.filter")
-    def test_staff_menu_visibility_uses_membership_not_session_role(
+    def test_staff_menu_visibility_uses_database_role_not_session_role(
         self,
         personal_filter,
         casa_filter,
@@ -123,7 +123,7 @@ class StaffContextTests(SimpleTestCase):
                 "rol": None,
             }
         }
-        personal_filter.return_value.exists.return_value = True
+        personal_filter.return_value.values_list.return_value = ["cuidador"]
         casa_filter.return_value.exists.return_value = False
 
         context = personal_context(request)
@@ -131,6 +131,7 @@ class StaffContextTests(SimpleTestCase):
             id_usuario__supabase_uid="admin-user-uuid",
         )
         self.assertTrue(context["es_personal"])
+        self.assertFalse(context["es_admin"])
         self.assertFalse(context["tiene_hogar_temporal"])
 
     @patch("mod_refugio.context_processors.Personal.objects.filter")
@@ -145,6 +146,7 @@ class StaffContextTests(SimpleTestCase):
 
         personal_filter.assert_not_called()
         self.assertFalse(context["es_personal"])
+        self.assertFalse(context["es_admin"])
 
     @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
     @patch("mod_refugio.context_processors.Personal.objects.filter")
@@ -155,16 +157,36 @@ class StaffContextTests(SimpleTestCase):
     ):
         request = RequestFactory().get("/adopcion/seguimiento/")
         request.session = {"refugio_usuario": {"id": "staff-user-uuid"}}
-        personal_filter.return_value.exists.return_value = True
+        personal_filter.return_value.values_list.return_value = ["cuidador"]
         casa_filter.return_value.exists.return_value = False
 
         html = render_to_string("index.html", request=request)
 
-        self.assertIn("Gestion y reportes", html)
+        self.assertIn("Gestion refugio", html)
+        self.assertNotIn("Estadisticas y reportes", html)
+        self.assertNotIn("/estadisticas/personal/", html)
         self.assertIn(
             'href="/adopcion/seguimiento/"',
             html,
         )
+
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_admin_menu_shows_statistics_report_links(
+        self,
+        personal_filter,
+        casa_filter,
+    ):
+        request = RequestFactory().get("/refugio/")
+        request.session = {"refugio_usuario": {"id": "admin-user-uuid"}}
+        personal_filter.return_value.values_list.return_value = ["admin"]
+        casa_filter.return_value.exists.return_value = False
+
+        html = render_to_string("index.html", request=request)
+
+        self.assertIn("/estadisticas/", html)
+        self.assertIn("/estadisticas/personal/", html)
+        self.assertIn("/estadisticas/donaciones/", html)
 
     @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
     @patch("mod_refugio.context_processors.Personal.objects.filter")
@@ -175,12 +197,13 @@ class StaffContextTests(SimpleTestCase):
     ):
         request = RequestFactory().get("/refugio/")
         request.session = {"refugio_usuario": {"id": "home-owner-uuid"}}
-        personal_filter.return_value.exists.return_value = False
+        personal_filter.return_value.values_list.return_value = []
         casa_filter.return_value.exists.return_value = True
 
         context = personal_context(request)
 
         self.assertFalse(context["es_personal"])
+        self.assertFalse(context["es_admin"])
         self.assertTrue(context["tiene_hogar_temporal"])
         casa_filter.assert_called_once_with(
             id_usuario__supabase_uid="home-owner-uuid",

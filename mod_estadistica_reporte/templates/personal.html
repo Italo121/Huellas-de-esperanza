@@ -1,0 +1,170 @@
+{% extends "index.html" %}
+
+{% block title %}Personal del refugio | Huellas de esperanza{% endblock %}
+
+{% block content %}
+<main class="container-fluid px-0 pb-4" aria-labelledby="staff-title">
+    <header class="mb-4">
+        <p class="text-success text-uppercase fw-semibold small mb-1">Gestión del refugio</p>
+        <h1 class="h2 fw-bold mb-1" id="staff-title">Personal del refugio</h1>
+        <p class="text-secondary mb-0">Consulta el equipo y sus datos de contacto laboral.</p>
+    </header>
+
+    <section class="row g-3 mb-4" aria-label="Resumen del personal">
+        <div class="col-12 col-sm-6">
+            <article class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <span class="rounded-circle bg-success-subtle text-success p-3">
+                        <i class="bi bi-people fs-4" aria-hidden="true"></i>
+                    </span>
+                    <div>
+                        <p class="text-secondary small mb-1">Personal listado</p>
+                        <p class="h3 fw-bold mb-0">{{ cantidad_personal }}</p>
+                    </div>
+                </div>
+            </article>
+        </div>
+        <div class="col-12 col-sm-6">
+            <article class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <span class="rounded-circle bg-primary-subtle text-primary p-3">
+                        <i class="bi bi-person-check fs-4" aria-hidden="true"></i>
+                    </span>
+                    <div>
+                        <p class="text-secondary small mb-1">Personal activo</p>
+                        <p class="h3 fw-bold mb-0">{{ cantidad_activa }}</p>
+                    </div>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm mb-4" aria-label="Filtros del listado">
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+                <div class="col-12 col-md-7">
+                    <label class="form-label" for="staff-search">Buscar por nombre o correo</label>
+                    <input class="form-control" type="search" id="staff-search" name="q"
+                           value="{{ busqueda }}" placeholder="Ej.: María Pérez">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label" for="staff-role">Rol</label>
+                    <select class="form-select" id="staff-role" name="rol">
+                        <option value="">Todos los roles</option>
+                        {% for valor, etiqueta in roles_disponibles %}
+                        <option value="{{ valor }}" {% if rol_seleccionado == valor %}selected{% endif %}>
+                            {{ etiqueta }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-2 d-grid">
+                    <button class="btn btn-success" type="submit">
+                        <i class="bi bi-search me-1" aria-hidden="true"></i>Buscar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </section>
+
+    <section class="card border-0 shadow-sm" aria-labelledby="staff-list-title">
+        <div class="card-body p-3 p-md-4">
+            <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mb-3">
+                <h2 class="h5 fw-bold mb-0" id="staff-list-title">Equipo de trabajo</h2>
+                <span class="small text-secondary">
+                    {{ cantidad_personal }} resultado{{ cantidad_personal|pluralize:"s" }}
+                </span>
+            </div>
+
+            {% if personal %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <caption class="visually-hidden">Listado del personal del refugio</caption>
+                    <thead class="table-light">
+                        <tr>
+                            <th scope="col">Nombre</th>
+                            <th scope="col">Rol</th>
+                            <th scope="col">Correo</th>
+                            <th scope="col">Fecha de ingreso</th>
+                            <th scope="col">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for persona in personal %}
+                        <tr>
+                            <th scope="row">
+                                {% if persona.id_usuario %}
+                                    {{ persona.id_usuario.p_nombre }}
+                                    {% if persona.id_usuario.s_nombre %}{{ persona.id_usuario.s_nombre }} {% endif %}
+                                    {{ persona.id_usuario.ap_paterno }}
+                                    {% if persona.id_usuario.ap_materno %}{{ persona.id_usuario.ap_materno }}{% endif %}
+                                {% else %}
+                                    Usuario sin perfil vinculado
+                                {% endif %}
+                            </th>
+                            <td>{{ persona.get_rol_display }}</td>
+                            <td>
+                                {% if persona.id_usuario and persona.id_usuario.correo %}
+                                <a href="mailto:{{ persona.id_usuario.correo }}">{{ persona.id_usuario.correo }}</a>
+                                {% else %}
+                                <span class="text-secondary">No registrado</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ persona.fecha_ingreso|date:"d/m/Y" }}</td>
+                            <td>
+                                {% if persona.id_estado and persona.id_estado.nombre|lower == "activo" and not persona.fecha_salida %}
+                                <span class="badge text-bg-success">Activo</span>
+                                {% elif persona.fecha_salida %}
+                                <span class="badge text-bg-secondary">Inactivo</span>
+                                {% elif persona.id_estado %}
+                                <span class="badge text-bg-secondary">{{ persona.id_estado.nombre }}</span>
+                                {% else %}
+                                <span class="badge text-bg-secondary">Sin estado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if personal.has_other_pages %}
+            <nav class="mt-4" aria-label="Paginación del personal">
+                <ul class="pagination justify-content-center mb-0">
+                    {% if personal.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link"
+                           href="?pagina={{ personal.previous_page_number }}&q={{ busqueda|urlencode }}&rol={{ rol_seleccionado|urlencode }}">
+                            Anterior
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+                    {% endif %}
+                    <li class="page-item disabled">
+                        <span class="page-link">Página {{ personal.number }} de {{ personal.paginator.num_pages }}</span>
+                    </li>
+                    {% if personal.has_next %}
+                    <li class="page-item">
+                        <a class="page-link"
+                           href="?pagina={{ personal.next_page_number }}&q={{ busqueda|urlencode }}&rol={{ rol_seleccionado|urlencode }}">
+                            Siguiente
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled"><span class="page-link">Siguiente</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+            {% else %}
+            <div class="text-center py-5">
+                <i class="bi bi-person-lines-fill display-5 text-secondary" aria-hidden="true"></i>
+                <p class="fw-semibold mt-3 mb-1">No se encontró personal</p>
+                <p class="text-secondary mb-0">Prueba con otro nombre, correo o rol.</p>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</main>
+{% endblock %}
