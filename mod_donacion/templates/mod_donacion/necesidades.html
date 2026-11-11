@@ -1,0 +1,70 @@
+{% extends "index.html" %}
+
+{% block title %}Necesidades del refugio | Huellas de esperanza{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3 p-lg-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+        <div>
+            <h2 class="fw-bold text-success">
+                <i class="bi bi-box2-heart-fill me-2"></i>Necesidades del refugio
+            </h2>
+            <p class="text-secondary mb-0">
+                Conoce qué necesita el refugio y ayuda con una donación.
+            </p>
+        </div>
+        <a class="btn btn-success" href="{% url 'mod_donacion:crear_donacion' %}">
+            <i class="bi bi-gift-fill me-2"></i>Realizar una donación
+        </a>
+    </div>
+
+    <div class="row g-4">
+        {% for necesidad in necesidades %}
+            <div class="col-12 col-lg-6">
+                <article class="card border-0 shadow-sm rounded-4 h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+                            <h3 class="h5 fw-bold mb-0">{{ necesidad.tipo_necesidad }}</h3>
+                            {% if necesidad.saciada %}
+                                <span class="badge text-bg-success">Saciada</span>
+                            {% else %}
+                                <span class="badge text-bg-warning">Pendiente</span>
+                            {% endif %}
+                        </div>
+                        <p class="text-secondary">{{ necesidad.descripcion }}</p>
+                        <p class="small text-secondary mb-3">
+                            Publicada el {{ necesidad.fecha|date:"d/m/Y" }}
+                            {% if necesidad.fecha_cambio and necesidad.saciada %}
+                                · Saciada el {{ necesidad.fecha_cambio|date:"d/m/Y" }}
+                            {% elif necesidad.fecha_cambio %}
+                                · Actualizada el {{ necesidad.fecha_cambio|date:"d/m/Y" }}
+                            {% endif %}
+                        </p>
+                        {% if not necesidad.saciada %}
+                            <a class="btn btn-outline-success"
+                               href="{% url 'mod_donacion:crear_donacion' %}?necesidad={{ necesidad.pk }}">
+                                Apoyar esta necesidad
+                            </a>
+                        {% endif %}
+                    </div>
+                </article>
+            </div>
+        {% empty %}
+            <div class="col-12">
+                <div class="alert alert-info mb-0">
+                    Por el momento no hay necesidades registradas.
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

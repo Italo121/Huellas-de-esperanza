@@ -1,0 +1,142 @@
+{% extends "index.html" %}
+
+{% block title %}Gestión de donaciones | Huellas de esperanza{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3 p-lg-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="mb-4">
+        <h2 class="fw-bold text-success">
+            <i class="bi bi-gift-fill me-2"></i>Gestión de donaciones
+        </h2>
+        <p class="text-secondary mb-0">
+            Consulta las donaciones recibidas y actualiza manualmente el estado de las necesidades.
+        </p>
+    </div>
+
+    <section class="mb-5" aria-labelledby="donaciones-independientes-heading">
+        <h3 id="donaciones-independientes-heading" class="h4 fw-bold mb-3">
+            Donaciones sin necesidad asociada
+        </h3>
+        {% for donacion in donaciones_independientes %}
+            <article class="card border-0 shadow-sm rounded-4 mb-3">
+                <div class="card-body p-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                        <h4 class="h5 fw-bold mb-0">{{ donacion.tipo_donacion }}</h4>
+                        <span class="badge text-bg-secondary">Independiente</span>
+                    </div>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-3">Cantidad</dt>
+                        <dd class="col-sm-9">{{ donacion.cantidad|floatformat:2 }}</dd>
+                        <dt class="col-sm-3">Descripción</dt>
+                        <dd class="col-sm-9">{{ donacion.descripcion }}</dd>
+                        <dt class="col-sm-3">Donante</dt>
+                        <dd class="col-sm-9">
+                            {{ donacion.id_usuario.p_nombre }} {{ donacion.id_usuario.ap_paterno }}
+                        </dd>
+                        <dt class="col-sm-3">Fecha</dt>
+                        <dd class="col-sm-9 mb-0">{{ donacion.fecha_donacion|date:"d/m/Y" }}</dd>
+                    </dl>
+                </div>
+            </article>
+        {% empty %}
+            <div class="alert alert-info">
+                Aún no se han registrado donaciones sin necesidad asociada.
+            </div>
+        {% endfor %}
+    </section>
+
+    <section aria-labelledby="donaciones-necesidades-heading">
+        <h3 id="donaciones-necesidades-heading" class="h4 fw-bold mb-3">
+            Donaciones asociadas a necesidades
+        </h3>
+        {% for necesidad in necesidades %}
+            <details class="card border-0 shadow-sm rounded-4 mb-3">
+                <summary class="card-header bg-white border-0 rounded-4 p-4"
+                         style="cursor: pointer;">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <span class="fw-bold">{{ necesidad.tipo_necesidad }}</span>
+                            <span class="text-secondary"> — {{ necesidad.descripcion }}</span>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            {% if necesidad.saciada %}
+                                <span class="badge text-bg-success">Saciada</span>
+                            {% else %}
+                                <span class="badge text-bg-warning">Pendiente</span>
+                            {% endif %}
+                            <span class="badge text-bg-light">
+                                {{ necesidad.donaciones_registradas|length }} donación(es)
+                            </span>
+                        </div>
+                    </div>
+                </summary>
+                <div class="card-body p-4 border-top">
+                    <p class="small text-secondary">
+                        Publicada el {{ necesidad.fecha|date:"d/m/Y" }}
+                        {% if necesidad.saciada and necesidad.fecha_cambio %}
+                            · Saciada el {{ necesidad.fecha_cambio|date:"d/m/Y" }}
+                        {% endif %}
+                    </p>
+
+                    {% if necesidad.donaciones_registradas %}
+                        <div class="table-responsive">
+                            <table class="table table-striped align-middle mb-4">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Donación</th>
+                                        <th scope="col">Cantidad</th>
+                                        <th scope="col">Descripción</th>
+                                        <th scope="col">Donante</th>
+                                        <th scope="col">Fecha</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for donacion in necesidad.donaciones_registradas %}
+                                        <tr>
+                                            <td>{{ donacion.tipo_donacion }}</td>
+                                            <td>{{ donacion.cantidad|floatformat:2 }}</td>
+                                            <td>{{ donacion.descripcion }}</td>
+                                            <td>
+                                                {{ donacion.id_usuario.p_nombre }}
+                                                {{ donacion.id_usuario.ap_paterno }}
+                                            </td>
+                                            <td>{{ donacion.fecha_donacion|date:"d/m/Y" }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info">
+                            Aún no se han recibido donaciones para esta necesidad.
+                        </div>
+                    {% endif %}
+
+                    {% if not necesidad.saciada %}
+                        <form method="post"
+                              action="{% url 'mod_donacion:marcar_necesidad_saciada' necesidad.pk %}">
+                            {% csrf_token %}
+                            <button class="btn btn-success" type="submit">
+                                Marcar necesidad como saciada
+                            </button>
+                        </form>
+                    {% endif %}
+                </div>
+            </details>
+        {% empty %}
+            <div class="alert alert-info">
+                No hay necesidades registradas para mostrar.
+            </div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}

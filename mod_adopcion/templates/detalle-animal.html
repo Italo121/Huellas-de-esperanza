@@ -10,6 +10,10 @@
         <!-- Encabezado -->
         <div class="card-body p-4 p-lg-5">
 
+            {% if error %}
+            <div class="alert alert-danger" role="alert">{{ error }}</div>
+            {% endif %}
+
             <header class="mb-4">
                 <div class="d-flex flex-column flex-md-row justify-content-between gap-2">
                     <div>
@@ -343,7 +347,7 @@
                         </a>
                     </p>
                 </div>
-                {% else %}
+                {% elif puede_solicitar_adopcion %}
                 <button type="button"
                         class="btn btn-success"
                         data-bs-toggle="modal"
@@ -355,7 +359,11 @@
                         Solicitar adopción
                     {% endif %}
                 </button>
-                {% endif %}
+                    {% else %}
+                    <button type="button" class="btn btn-secondary" disabled>
+                        Animal no disponible para adopción
+                    </button>
+                    {% endif %}
 
             </div>
 
@@ -365,7 +373,7 @@
 </div>
 
 <!-- Modal de solicitud de adopción -->
-{% if not solicitud_existente %}
+{% if puede_solicitar_adopcion and not solicitud_existente %}
 <div class="modal fade" id="modalAdopcion" tabindex="-1"
      aria-labelledby="modalAdopcionLabel" aria-hidden="true">
 
@@ -416,7 +424,7 @@
                                   id="motivo"
                                   class="form-control"
                                   rows="4"
-                                  maxlength="50"
+                                  maxlength="150"
                                   placeholder="Cuéntanos tus motivos..."
                                   required></textarea>
 

@@ -6,6 +6,15 @@
 
 <div class="container-fluid p-3 p-lg-4">
 
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
     <!-- Encabezado -->
     <div class="mb-4">
         <h2 class="fw-bold text-success">
@@ -31,7 +40,7 @@
                     {{ adopciones|length }}
                 </h3>
                 <span class="text-secondary">
-                    Adopciones registradas
+                    Registros de adopción
                 </span>
             </div>
         </div>
@@ -72,9 +81,19 @@
 
                         <div class="card-body p-4">
 
+                            {% if adopcion.id_adopcion in devoluciones_aprobadas %}
+                            <span class="badge text-bg-info mb-2">
+                                Devolución aprobada
+                            </span>
+                            {% elif adopcion.fecha_termino %}
+                            <span class="badge text-bg-secondary mb-2">
+                                Adopción finalizada
+                            </span>
+                            {% else %}
                             <span class="badge bg-success mb-2">
                                 Adopción registrada
                             </span>
+                            {% endif %}
 
                             <h4 class="fw-bold mb-1">
                                 {{ adopcion.id_animal.nombre|default:"Sin nombre" }}
@@ -105,7 +124,7 @@
 
                             </div>
 
-                            {% if not adopcion.fecha_termino %}
+                            {% if not adopcion.fecha_termino and adopcion.id_adopcion not in devoluciones_solicitadas %}
                                 <button
                                     type="button"
                                     class="btn btn-outline-danger w-100"
@@ -114,6 +133,130 @@
                                     <i class="bi bi-arrow-return-left me-2"></i>
                                     Solicitar devolución
                                 </button>
+
+                                <div
+                                    class="modal fade"
+                                    id="devolucionModal{{ adopcion.id_adopcion }}"
+                                    tabindex="-1"
+                                    aria-labelledby="devolucionModalLabel{{ adopcion.id_adopcion }}"
+                                    aria-hidden="true">
+                                    <div class="modal-dialog modal-dialog-centered">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5
+                                                    class="modal-title"
+                                                    id="devolucionModalLabel{{ adopcion.id_adopcion }}">
+                                                    Solicitud de devolución
+                                                </h5>
+                                                <button
+                                                    type="button"
+                                                    class="btn-close"
+                                                    data-bs-dismiss="modal"
+                                                    aria-label="Cerrar">
+                                                </button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <p>
+                                                    Completa los datos para enviar al refugio una solicitud de devolución de
+                                                    <strong>{{ adopcion.id_animal.nombre|default:"este animal" }}</strong>.
+                                                    La adopción seguirá activa hasta que el refugio evalúe la solicitud.
+                                                </p>
+                                                <form
+                                                    id="devolucionForm{{ adopcion.id_adopcion }}"
+                                                    method="post"
+                                                    action="{% url 'mod_adopcion:solicitar_devolucion' adopcion.id_adopcion %}">
+                                                    {% csrf_token %}
+                                                    <div class="mb-3">
+                                                        <label
+                                                            for="motivo{{ adopcion.id_adopcion }}"
+                                                            class="form-label">
+                                                            Motivo de la devolución
+                                                        </label>
+                                                        <textarea
+                                                            class="form-control"
+                                                            id="motivo{{ adopcion.id_adopcion }}"
+                                                            name="motivo"
+                                                            rows="2"
+                                                            maxlength="50"
+                                                            required></textarea>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label
+                                                            for="condicion{{ adopcion.id_adopcion }}"
+                                                            class="form-label">
+                                                            Condición actual del animal
+                                                        </label>
+                                                        <select
+                                                            class="form-select"
+                                                            id="condicion{{ adopcion.id_adopcion }}"
+                                                            name="condicion_animal"
+                                                            required>
+                                                            <option value="" selected disabled>
+                                                                Selecciona una condición
+                                                            </option>
+                                                            <option value="sano">Sano</option>
+                                                            <option value="en_tratamiento">En tratamiento</option>
+                                                            <option value="grave">Grave</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label
+                                                            for="observacion{{ adopcion.id_adopcion }}"
+                                                            class="form-label">
+                                                            Observaciones
+                                                        </label>
+                                                        <textarea
+                                                            class="form-control"
+                                                            id="observacion{{ adopcion.id_adopcion }}"
+                                                            name="observacion"
+                                                            rows="2"></textarea>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input
+                                                            class="form-check-input"
+                                                            type="checkbox"
+                                                            id="tratamiento{{ adopcion.id_adopcion }}"
+                                                            name="requiere_tratamiento">
+                                                        <label
+                                                            class="form-check-label"
+                                                            for="tratamiento{{ adopcion.id_adopcion }}">
+                                                            El animal requiere tratamiento
+                                                        </label>
+                                                    </div>
+                                                </form>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-outline-secondary"
+                                                    data-bs-dismiss="modal">
+                                                    Cancelar
+                                                </button>
+                                                <button
+                                                    type="submit"
+                                                    form="devolucionForm{{ adopcion.id_adopcion }}"
+                                                    class="btn btn-danger">
+                                                    <i class="bi bi-send me-2"></i>
+                                                    Enviar solicitud
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            {% elif adopcion.id_adopcion in devoluciones_aprobadas %}
+                                <div class="alert alert-info mb-0" role="status">
+                                    <strong>El refugio aprobó la devolución.</strong>
+                                    El animal fue devuelto al refugio y esta adopción finalizó.
+                                </div>
+                            {% elif adopcion.id_adopcion in devoluciones_rechazadas %}
+                                <div class="alert alert-warning mb-0" role="status">
+                                    La solicitud de devolución fue rechazada. La adopción continúa activa.
+                                </div>
+                            {% elif adopcion.id_adopcion in devoluciones_solicitadas %}
+                                <span class="btn btn-outline-secondary w-100 disabled">
+                                    <i class="bi bi-hourglass-split me-2"></i>
+                                    Solicitud de devolución en revisión
+                                </span>
                             {% endif %}
 
                         </div>
@@ -157,4 +300,4 @@
 
 </div>
 
-{% endblock %}
+{% endblock %} 

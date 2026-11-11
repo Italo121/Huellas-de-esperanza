@@ -23,6 +23,11 @@ urlpatterns = [
         name="mis_adopciones"
     ),
     path(
+        "mis-adopciones/<int:id_adopcion>/devolver/",
+        views.solicitar_devolucion,
+        name="solicitar_devolucion",
+    ),
+    path(
         "mis-solicitudes/",
         views.mis_solicitudes,
         name="mis_solicitudes"

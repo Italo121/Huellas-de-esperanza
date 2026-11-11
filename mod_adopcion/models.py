@@ -2,6 +2,9 @@ from django.db import models
 from django.utils import timezone
 
 
+ESTADO_ANIMAL_OCULTO_ID = 36
+
+
 class Adopcion(models.Model):
     id_adopcion = models.BigAutoField(primary_key=True)
     id_animal = models.ForeignKey(
@@ -59,6 +62,32 @@ class SeguimientoAdopcion(models.Model):
         db_table = "seguimiento_adopcion"
 
 
+class DevolucionAdopcion(models.Model):
+    id_dev = models.BigAutoField(primary_key=True)
+    fecha_devolucion = models.DateField()
+    motivo = models.CharField(max_length=50)
+    condicion_animal = models.TextField()
+    observacion = models.TextField(blank=True)
+    requiere_tratamiento = models.BooleanField(default=False)
+    fecha_evaluacion = models.DateField(null=True, blank=True)
+    id_adopcion = models.ForeignKey(
+        Adopcion,
+        on_delete=models.DO_NOTHING,
+        db_column="id_adopcion",
+        related_name="devoluciones",
+    )
+    id_estado = models.ForeignKey(
+        Estado,
+        on_delete=models.DO_NOTHING,
+        db_column="id_estado",
+        related_name="devoluciones_adopcion",
+    )
+
+    class Meta:
+        managed = False
+        db_table = "devolucion_adopcion"
+
+
 class SolicitudAdopcion(models.Model):
     PENDIENTE = "pendiente"
     APROBADA = "aprobada"
@@ -85,7 +114,7 @@ class SolicitudAdopcion(models.Model):
         db_column="id_usuario",
         related_name="solicitudes_adopcion",
     )
-    motivo = models.CharField(max_length=50)
+    motivo = models.TextField()
     observacion = models.CharField(max_length=50, null=True, blank=True)
     id_estado = models.ForeignKey(
         Estado,
