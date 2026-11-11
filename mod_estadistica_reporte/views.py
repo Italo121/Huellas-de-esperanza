@@ -3,7 +3,7 @@ import logging
 from django.contrib.auth.views import redirect_to_login
 from django.core.paginator import Paginator
 from django.db import DatabaseError
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Q
 from django.db.models.functions import ExtractMonth, ExtractYear
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import render, resolve_url
@@ -284,8 +284,6 @@ def inventario_donaciones(request):
                 "fecha_hasta": fecha_hasta_texto,
                 "tipos_donacion": [],
                 "donaciones": [],
-                "resumen": {},
-                "cantidades_por_tipo": [],
             },
             status=400,
         )
@@ -301,8 +299,6 @@ def inventario_donaciones(request):
                 "fecha_hasta": fecha_hasta_texto,
                 "tipos_donacion": [],
                 "donaciones": [],
-                "resumen": {},
-                "cantidades_por_tipo": [],
             },
             status=400,
         )
@@ -345,15 +341,11 @@ def inventario_donaciones(request):
                 "pk",
                 filter=Q(id_necesidad__isnull=False),
             ),
-        )
-        cantidades_por_tipo = list(
-            donaciones.order_by()
-            .values("tipo_donacion")
-            .annotate(
-                total_registros=Count("pk"),
-                cantidad_total=Sum("cantidad"),
-            )
-            .order_by("tipo_donacion")
+            necesidades_saciadas=Count(
+                "id_necesidad",
+                distinct=True,
+                filter=Q(id_necesidad__saciada=True),
+            ),
         )
         pagina = Paginator(
             donaciones.order_by("-fecha_donacion", "-id_donacion"),
@@ -378,6 +370,5 @@ def inventario_donaciones(request):
             "fecha_desde": fecha_desde_texto,
             "fecha_hasta": fecha_hasta_texto,
             "resumen": resumen,
-            "cantidades_por_tipo": cantidades_por_tipo,
         },
     )
