@@ -1,0 +1,59 @@
+<script>
+    (() => {
+        function getValidationMessage(field) {
+            const validity = field.validity;
+
+            if (validity.valueMissing) {
+                return field instanceof HTMLSelectElement
+                    ? "Selecciona una opción."
+                    : "Completa este campo.";
+            }
+            if (validity.typeMismatch && field.type === "email") {
+                return "Ingresa un correo electrónico válido.";
+            }
+            if (validity.typeMismatch && field.type === "url") {
+                return "Ingresa una dirección web válida.";
+            }
+            if (validity.patternMismatch) {
+                return "Respeta el formato solicitado.";
+            }
+            if (validity.tooShort) {
+                return `Ingresa al menos ${field.minLength} caracteres.`;
+            }
+            if (validity.tooLong) {
+                return `Ingresa como máximo ${field.maxLength} caracteres.`;
+            }
+            if (validity.rangeUnderflow) {
+                return `El valor debe ser igual o mayor que ${field.min}.`;
+            }
+            if (validity.rangeOverflow) {
+                return `El valor debe ser igual o menor que ${field.max}.`;
+            }
+            if (validity.stepMismatch || validity.badInput) {
+                return "Ingresa un valor válido.";
+            }
+            return "";
+        }
+
+        function handleValidationEvent(event) {
+            const field = event.target;
+            if (
+                !(field instanceof HTMLInputElement) &&
+                !(field instanceof HTMLSelectElement) &&
+                !(field instanceof HTMLTextAreaElement)
+            ) {
+                return;
+            }
+
+            if (event.type === "input" || event.type === "change") {
+                field.setCustomValidity("");
+            } else if (!field.validity.customError) {
+                field.setCustomValidity(getValidationMessage(field));
+            }
+        }
+
+        document.addEventListener("invalid", handleValidationEvent, true);
+        document.addEventListener("input", handleValidationEvent, true);
+        document.addEventListener("change", handleValidationEvent, true);
+    })();
+</script>

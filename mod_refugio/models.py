@@ -187,6 +187,7 @@ class Animal(models.Model):
         choices=[
             ("perro", "Perro"),
             ("gato", "Gato"),
+            ("hamster", "Hámster"),
             ("otro", "Otro"),
         ],
     )

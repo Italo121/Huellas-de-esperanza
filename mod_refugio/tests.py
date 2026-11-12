@@ -1937,6 +1937,14 @@ class RegistroAnimalTests(SimpleTestCase):
             ],
         )
 
+    def test_hamster_is_available_when_registering_and_editing_animals(self):
+        for form in (
+            views.RegistroAnimalForm,
+            views.EditarAnimalForm,
+        ):
+            choices = dict(form.base_fields["especie"].choices)
+            self.assertEqual(choices["hamster"], "Hámster")
+
     def test_state_selectors_are_filtered_by_entity_type(self):
         animal_query_params = (
             views.RegistroAnimalForm.base_fields["estado_animal"]
