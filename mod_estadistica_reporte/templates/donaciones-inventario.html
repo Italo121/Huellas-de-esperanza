@@ -18,7 +18,7 @@
 
     {% if resumen %}
     <section class="row g-3 mb-4" aria-label="Resumen de donaciones filtradas">
-        <div class="col-12 col-md-4">
+        <div class="col-6 col-xl-3">
             <article class="card border-0 shadow-sm h-100">
                 <div class="card-body d-flex align-items-center gap-3">
                     <span class="rounded-circle bg-success-subtle text-success p-3">
@@ -31,7 +31,7 @@
                 </div>
             </article>
         </div>
-        <div class="col-12 col-md-4">
+        <div class="col-6 col-xl-3">
             <article class="card border-0 shadow-sm h-100">
                 <div class="card-body d-flex align-items-center gap-3">
                     <span class="rounded-circle bg-primary-subtle text-primary p-3">
@@ -44,7 +44,7 @@
                 </div>
             </article>
         </div>
-        <div class="col-12 col-md-4">
+        <div class="col-6 col-xl-3">
             <article class="card border-0 shadow-sm h-100">
                 <div class="card-body d-flex align-items-center gap-3">
                     <span class="rounded-circle bg-warning-subtle text-warning p-3">
@@ -57,27 +57,18 @@
                 </div>
             </article>
         </div>
-    </section>
-    {% endif %}
-
-    {% if cantidades_por_tipo %}
-    <section class="card border-0 shadow-sm mb-4" aria-labelledby="type-totals-title">
-        <div class="card-body p-3 p-md-4">
-            <h2 class="h5 fw-bold mb-3" id="type-totals-title">Cantidades por tipo</h2>
-            <div class="row g-3">
-                {% for tipo in cantidades_por_tipo %}
-                <div class="col-12 col-sm-6 col-xl-4">
-                    <article class="border rounded-3 p-3 h-100">
-                        <div class="d-flex justify-content-between align-items-start gap-2">
-                            <h3 class="h6 fw-semibold mb-2">{{ tipo.tipo_donacion }}</h3>
-                            <span class="badge text-bg-light">{{ tipo.total_registros }} registro{{ tipo.total_registros|pluralize:"s" }}</span>
-                        </div>
-                        <p class="h4 fw-bold text-success mb-0">{{ tipo.cantidad_total|floatformat:2 }}</p>
-                        <p class="small text-secondary mb-0">Cantidad acumulada de este tipo</p>
-                    </article>
+        <div class="col-6 col-xl-3">
+            <article class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <span class="rounded-circle bg-info-subtle text-info p-3">
+                        <i class="bi bi-check2-circle fs-4" aria-hidden="true"></i>
+                    </span>
+                    <div>
+                        <p class="text-secondary small mb-1">Necesidades saciadas</p>
+                        <p class="h3 fw-bold mb-0">{{ resumen.necesidades_saciadas }}</p>
+                    </div>
                 </div>
-                {% endfor %}
-            </div>
+            </article>
         </div>
     </section>
     {% endif %}
@@ -129,7 +120,7 @@
             <div class="d-flex flex-column flex-sm-row justify-content-between gap-2 mb-3">
                 <h2 class="h5 fw-bold mb-0" id="donations-list-title">Donaciones recibidas</h2>
                 <span class="small text-secondary">
-                    {{ resumen.total_registros|default:0 }} resultado{{ resumen.total_registros|pluralize:"s" }}
+                    {{ donaciones.paginator.count }} resultado{{ donaciones.paginator.count|pluralize:"s" }}
                 </span>
             </div>
 
