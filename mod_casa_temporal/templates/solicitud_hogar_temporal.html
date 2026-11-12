@@ -56,7 +56,8 @@
         El equipo del refugio revisará la postulación.
     </p>
 
-    <form method="post" action="{% url 'mod_casa_temporal:solicitar_hogar_temporal' %}">
+    <form method="post" action="{% url 'mod_casa_temporal:solicitar_hogar_temporal' %}"
+          enctype="multipart/form-data">
         {% csrf_token %}
         {% if form.non_field_errors %}
         <div class="alert alert-danger" role="alert">{{ form.non_field_errors }}</div>
@@ -68,6 +69,9 @@
             <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
             {% endif %}
             {{ field }}
+            {% if field.help_text %}
+            <div class="form-text">{{ field.help_text }}</div>
+            {% endif %}
             {% if field.name == 'patio' %}
             <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
             {% endif %}

@@ -42,7 +42,7 @@
                     <dd class="col-sm-8">{% if hogar.patio %}Sí{% else %}No{% endif %}</dd>
                     {% if hogar.evidencia %}
                     <dt class="col-sm-4">Evidencia registrada</dt>
-                    <dd class="col-sm-8">{{ hogar.evidencia|linebreaksbr }}</dd>
+                    <dd class="col-sm-8">{{ hogar.evidencia|urlize|linebreaksbr }}</dd>
                     {% endif %}
                     {% if hogar.observacion %}
                     <dt class="col-sm-4">Observaciones</dt>

@@ -1,5 +1,7 @@
 # Create your views here.
 import logging
+from pathlib import PurePosixPath
+from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
@@ -10,11 +12,28 @@ from django.urls import reverse
 from django.utils import timezone
 
 from mod_refugio.models import Animal, Estado, Personal, Usuario
+from mod_refugio.supabase_client import supabase_storage
 
-from .forms import GestionHogaresTemporalesForm, SolicitudHogarTemporalForm
+from .forms import (
+    EVIDENCE_FILE_TYPES,
+    GestionHogaresTemporalesForm,
+    SolicitudHogarTemporalForm,
+)
 from .models import CasaTemporal, HogarAnimal, SolicitudHogarTemporal
 
 logger = logging.getLogger(__name__)
+
+
+def _remove_evidence_uploads(bucket, uploaded_paths, user_pk):
+    if not uploaded_paths:
+        return
+    try:
+        bucket.remove(uploaded_paths)
+    except Exception:
+        logger.exception(
+            "Unable to clean up temporary-home evidence files for user %s",
+            user_pk,
+        )
 
 
 def mis_hogares_temporales(request):
@@ -398,7 +417,7 @@ def solicitar_hogar_temporal(request):
     response_status = 200
 
     if request.method == "POST" and solicitud_pendiente is None:
-        form = SolicitudHogarTemporalForm(request.POST)
+        form = SolicitudHogarTemporalForm(request.POST, request.FILES)
         if form.is_valid():
             estado_pendiente = (
                 Estado.objects.filter(
@@ -419,46 +438,114 @@ def solicitar_hogar_temporal(request):
                 )
             else:
                 datos = form.cleaned_data
-                try:
-                    with transaction.atomic():
-                        casa = CasaTemporal.objects.create(
-                            poblacion=datos["poblacion"],
-                            calle=datos["calle"],
-                            num_casa=datos["num_casa"],
-                            cant_persona=datos["cant_persona"],
-                            cant_habitacion=datos["cant_habitacion"],
-                            patio=datos["patio"],
-                            metro_c=datos["metro_c"],
-                            evidencia=datos["evidencia"],
-                            observacion=datos["observacion_casa"] or None,
-                            fecha_ingreso=timezone.localdate(),
-                            id_usuario=usuario,
-                            id_estado=estado_pendiente,
-                        )
-                        SolicitudHogarTemporal.objects.create(
-                            fecha_solicitud=timezone.localdate(),
-                            motivo=datos["motivo"],
-                            id_casa=casa,
-                            id_estado=estado_pendiente,
-                        )
-                except DatabaseError:
-                    logger.exception(
-                        "Unable to save temporary-home application for user %s",
-                        usuario.pk,
-                    )
+                evidencia = datos["evidencia"]
+                archivos = datos["evidencia_archivos"]
+                uploaded_paths = []
+                bucket = None
+
+                if archivos and supabase_storage is None:
                     error = (
-                        "No pudimos enviar tu solicitud. Revisa los datos "
-                        "e inténtalo nuevamente."
+                        "La carga de archivos no está disponible en este "
+                        "momento. Inténtalo más tarde."
                     )
-                    response_status = 500
-                else:
-                    messages.success(
-                        request,
-                        "Tu postulación como hogar temporal fue enviada correctamente.",
-                    )
-                    return redirect(
-                        "mod_casa_temporal:solicitar_hogar_temporal"
-                    )
+                    response_status = 503
+                elif archivos:
+                    lineas_archivos = []
+                    try:
+                        bucket = supabase_storage.storage.from_("Evidencias")
+                        for archivo in archivos:
+                            extension = PurePosixPath(
+                                archivo.name.replace("\\", "/")
+                            ).suffix.lower()
+                            content_type = EVIDENCE_FILE_TYPES[extension][0]
+                            ruta = f"{uuid4().hex}{extension}"
+                            archivo.seek(0)
+                            bucket.upload(
+                                ruta,
+                                archivo.read(),
+                                {
+                                    "content-type": content_type,
+                                    "upsert": "false",
+                                },
+                            )
+                            uploaded_paths.append(ruta)
+                            url_archivo = bucket.get_public_url(ruta)
+                            nombre_archivo = PurePosixPath(
+                                archivo.name.replace("\\", "/")
+                            ).name.replace("\r", "").replace("\n", "")
+                            lineas_archivos.append(
+                                f"- {nombre_archivo}: {url_archivo}"
+                            )
+
+                        separador = "\n\n----- Evidencias adjuntas -----\n"
+                        if evidencia:
+                            evidencia = f"{evidencia}{separador}"
+                        else:
+                            evidencia = "Evidencias adjuntas:\n"
+                        evidencia += "\n".join(lineas_archivos)
+                    except Exception:
+                        logger.exception(
+                            "Unable to upload temporary-home evidence files "
+                            "for user %s",
+                            usuario.pk,
+                        )
+                        _remove_evidence_uploads(
+                            bucket,
+                            uploaded_paths,
+                            usuario.pk,
+                        )
+                        error = (
+                            "No pudimos subir los archivos de evidencia. "
+                            "Revisa los archivos e inténtalo nuevamente."
+                        )
+                        response_status = 502
+
+                if error is None:
+                    try:
+                        with transaction.atomic():
+                            casa = CasaTemporal.objects.create(
+                                poblacion=datos["poblacion"],
+                                calle=datos["calle"],
+                                num_casa=datos["num_casa"],
+                                cant_persona=datos["cant_persona"],
+                                cant_habitacion=datos["cant_habitacion"],
+                                patio=datos["patio"],
+                                metro_c=datos["metro_c"],
+                                evidencia=evidencia,
+                                observacion=datos["observacion_casa"] or None,
+                                fecha_ingreso=timezone.localdate(),
+                                id_usuario=usuario,
+                                id_estado=estado_pendiente,
+                            )
+                            SolicitudHogarTemporal.objects.create(
+                                fecha_solicitud=timezone.localdate(),
+                                motivo=datos["motivo"],
+                                id_casa=casa,
+                                id_estado=estado_pendiente,
+                            )
+                    except DatabaseError:
+                        logger.exception(
+                            "Unable to save temporary-home application for user %s",
+                            usuario.pk,
+                        )
+                        _remove_evidence_uploads(
+                            bucket,
+                            uploaded_paths,
+                            usuario.pk,
+                        )
+                        error = (
+                            "No pudimos enviar tu solicitud. Revisa los datos "
+                            "e inténtalo nuevamente."
+                        )
+                        response_status = 500
+                    else:
+                        messages.success(
+                            request,
+                            "Tu postulación como hogar temporal fue enviada correctamente.",
+                        )
+                        return redirect(
+                            "mod_casa_temporal:solicitar_hogar_temporal"
+                        )
 
     return render(
         request,

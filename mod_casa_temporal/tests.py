@@ -1,11 +1,12 @@
 from django.test import TestCase
 
-# Create your tests here.
-from datetime import date
 from contextlib import nullcontext
+from datetime import date
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import HttpResponse
 from django.test import RequestFactory, SimpleTestCase
 
@@ -14,6 +15,130 @@ from mod_refugio.models import Estado, Usuario
 from . import views
 from .forms import SolicitudHogarTemporalForm
 from .models import CasaTemporal, SolicitudHogarTemporal
+
+
+class SolicitudHogarTemporalFormTests(SimpleTestCase):
+    def form_data(self, evidencia=""):
+        return {
+            "poblacion": "Centro",
+            "calle": "Calle Uno",
+            "num_casa": "123",
+            "cant_persona": "3",
+            "cant_habitacion": "2",
+            "metro_c": "80",
+            "evidencia": evidencia,
+            "observacion_casa": "",
+            "motivo": "Quiero apoyar al refugio",
+        }
+
+    def test_requires_text_or_at_least_one_file(self):
+        form = SolicitudHogarTemporalForm(self.form_data())
+
+        self.assertFalse(form.is_valid())
+        self.assertIn(
+            "Escribe una descripción o adjunta al menos un archivo.",
+            form.errors["evidencia"],
+        )
+
+    def test_accepts_text_without_upload(self):
+        form = SolicitudHogarTemporalForm(
+            self.form_data("Descripción del espacio")
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["evidencia_archivos"], [])
+
+    def test_accepts_multiple_valid_pdf_files_without_text(self):
+        files = {
+            "evidencia_archivos": [
+                SimpleUploadedFile(
+                    "evidencia-1.pdf",
+                    b"%PDF-1.4\ncontenido",
+                    content_type="application/pdf",
+                ),
+                SimpleUploadedFile(
+                    "evidencia-2.pdf",
+                    b"%PDF-1.4\ncontenido",
+                    content_type="application/pdf",
+                ),
+            ]
+        }
+        form = SolicitudHogarTemporalForm(self.form_data(), files)
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(len(form.cleaned_data["evidencia_archivos"]), 2)
+
+    def test_accepts_png_and_rejects_an_extension_format_mismatch(self):
+        from PIL import Image
+
+        image_bytes = BytesIO()
+        Image.new("RGB", (1, 1), color="green").save(
+            image_bytes,
+            format="PNG",
+        )
+        content = image_bytes.getvalue()
+        valid_form = SolicitudHogarTemporalForm(
+            self.form_data(),
+            {
+                "evidencia_archivos": [
+                    SimpleUploadedFile(
+                        "evidencia.png",
+                        content,
+                        content_type="image/png",
+                    )
+                ]
+            },
+        )
+        invalid_form = SolicitudHogarTemporalForm(
+            self.form_data(),
+            {
+                "evidencia_archivos": [
+                    SimpleUploadedFile(
+                        "evidencia.jpg",
+                        content,
+                        content_type="image/jpeg",
+                    )
+                ]
+            },
+        )
+
+        self.assertTrue(valid_form.is_valid(), valid_form.errors)
+        self.assertFalse(invalid_form.is_valid())
+        self.assertIn(
+            "La extensión del archivo no coincide con su formato.",
+            invalid_form.errors["evidencia_archivos"],
+        )
+
+    def test_rejects_unsupported_and_oversized_files(self):
+        unsupported_file = SimpleUploadedFile(
+            "evidencia.txt",
+            b"no permitido",
+            content_type="text/plain",
+        )
+        unsupported_form = SolicitudHogarTemporalForm(
+            self.form_data(),
+            {"evidencia_archivos": [unsupported_file]},
+        )
+        self.assertFalse(unsupported_form.is_valid())
+        self.assertIn(
+            "Solo se permiten archivos JPG, PNG o PDF.",
+            unsupported_form.errors["evidencia_archivos"],
+        )
+
+        oversized_file = SimpleUploadedFile(
+            "evidencia.pdf",
+            b"%PDF-" + b"x" * (5 * 1024 * 1024),
+            content_type="application/pdf",
+        )
+        oversized_form = SolicitudHogarTemporalForm(
+            self.form_data(),
+            {"evidencia_archivos": [oversized_file]},
+        )
+        self.assertFalse(oversized_form.is_valid())
+        self.assertIn(
+            "Cada archivo debe pesar como máximo 5 MB.",
+            oversized_form.errors["evidencia_archivos"],
+        )
 
 
 class SolicitudHogarTemporalSchemaTests(SimpleTestCase):
@@ -46,6 +171,11 @@ class SolicitudHogarTemporalSchemaTests(SimpleTestCase):
                 "patio": "on",
                 "metro_c": "80",
                 "evidencia": "Revisar con el equipo",
+                "evidencia_archivos": SimpleUploadedFile(
+                    "evidencia.pdf",
+                    b"%PDF-1.4\ncontenido",
+                    content_type="application/pdf",
+                ),
                 "observacion_casa": "",
                 "motivo": "Quiero apoyar al refugio",
                 "observacion": "",
@@ -84,6 +214,7 @@ class SolicitudHogarTemporalSchemaTests(SimpleTestCase):
             patch(
                 "mod_casa_temporal.views.SolicitudHogarTemporal.objects.create",
             ) as crear_solicitud,
+            patch("mod_casa_temporal.views.supabase_storage") as storage_mock,
             patch(
                 "mod_casa_temporal.views.transaction.atomic",
                 return_value=nullcontext(),
@@ -94,6 +225,25 @@ class SolicitudHogarTemporalSchemaTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, "/casa-temporal/solicitar/")
+        bucket = storage_mock.storage.from_.return_value
+        storage_mock.storage.from_.assert_called_once_with("Evidencias")
+        bucket.upload.assert_called_once()
+        uploaded_path, uploaded_content, upload_options = bucket.upload.call_args.args
+        self.assertRegex(uploaded_path, r"^[0-9a-f]{32}\.pdf$")
+        self.assertEqual(uploaded_content, b"%PDF-1.4\ncontenido")
+        self.assertEqual(
+            upload_options,
+            {"content-type": "application/pdf", "upsert": "false"},
+        )
+        self.assertEqual(
+            crear_casa.call_args.kwargs["evidencia"],
+            (
+                "Revisar con el equipo\n\n"
+                "----- Evidencias adjuntas -----\n"
+                "- evidencia.pdf: "
+                f"{bucket.get_public_url.return_value}"
+            ),
+        )
         self.assertIs(crear_casa.call_args.kwargs["id_estado"], estado_pendiente)
         self.assertIs(crear_solicitud.call_args.kwargs["id_estado"], estado_pendiente)
         self.assertNotIn("id_animal", crear_solicitud.call_args.kwargs)

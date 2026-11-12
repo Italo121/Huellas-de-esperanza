@@ -606,7 +606,7 @@
                             {% if solicitud.id_casa.patio %}con patio{% else %}sin patio{% endif %}
                         </dd>
                         <dt class="col-md-3">Evidencia</dt>
-                        <dd class="col-md-9">{{ solicitud.id_casa.evidencia|linebreaksbr }}</dd>
+                        <dd class="col-md-9">{{ solicitud.id_casa.evidencia|urlize|linebreaksbr }}</dd>
                         {% if solicitud.id_casa.observacion %}
                         <dt class="col-md-3">Observaciones de vivienda</dt>
                         <dd class="col-md-9">{{ solicitud.id_casa.observacion|linebreaksbr }}</dd>
