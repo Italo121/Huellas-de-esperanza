@@ -13,6 +13,7 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import RequestFactory, SimpleTestCase
 from django.urls import resolve, reverse
+from django.utils import translation
 from httpx import ReadTimeout
 
 from .context_processors import personal_context
@@ -87,6 +88,37 @@ class InformacionRefugioTests(SimpleTestCase):
         self.assertTrue(context["coordenadas_validas"])
         self.assertIn("mlat=-36.820000", context["external_map_url"])
         self.assertIn("mlon=-73.040000", context["external_map_url"])
+
+    def test_map_data_coordinates_remain_unlocalized_for_javascript(self):
+        refuge = SimpleNamespace(
+            id_refugio=1,
+            nombre="Refugio Esperanza",
+            direccion="Calle 123",
+            telefono=987654321,
+            correo="contacto@example.cl",
+            latitud=Decimal("-36.820000"),
+            longitud=Decimal("-73.040000"),
+        )
+
+        with translation.override("es"):
+            html = render_to_string(
+                "informacion_refugio.html",
+                {
+                    "refugio": refuge,
+                    "coordenadas_validas": True,
+                    "external_map_url": "https://example.com/map",
+                    "es_personal": False,
+                    "es_admin": False,
+                    "tiene_hogar_temporal": False,
+                },
+            )
+
+        self.assertIn('data-latitude="-36.820000"', html)
+        self.assertIn('data-longitude="-73.040000"', html)
+        self.assertRegex(
+            html,
+            r"Coordenadas:\s*-36\.820000,\s*-73\.040000",
+        )
 
     @patch("mod_refugio.views.render", return_value=HttpResponse("empty"))
     @patch("mod_refugio.views.Refugio.objects.order_by")
