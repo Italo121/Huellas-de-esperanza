@@ -1,15 +1,16 @@
 services:
   web:
     build: .
-    env_file:         # <-- AÑADE ESTA LÍNEA
-      - .env          # <-- AÑADE ESTA LÍNEA
+    env_file:
+      - .env
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in your environment or .env file}
-      DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Define DJANGO_SECRET_KEY in .env}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in your environment or .env file}
+      DATABASE_URL: ${DATABASE_URL:?Define DATABASE_URL in .env}
+      DATABASE_SSLMODE: ${DATABASE_SSLMODE:-require}
     init: true
     security_opt:
       - no-new-privileges:true

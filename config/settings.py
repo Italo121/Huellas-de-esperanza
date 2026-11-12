@@ -121,7 +121,7 @@ DATABASES = {
         "CONN_MAX_AGE": 60,
         "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
-            "sslmode": "require",
+            "sslmode": os.environ.get("DATABASE_SSLMODE", "require"),
             "connect_timeout": 10,
         },
     }
