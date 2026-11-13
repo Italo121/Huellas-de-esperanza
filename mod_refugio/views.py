@@ -10,7 +10,6 @@ from django.http import JsonResponse
 from django.contrib.auth.views import redirect_to_login
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
-from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
@@ -267,18 +266,98 @@ def gestion_solicitudes(request):
         id_estado__tipo_estado="Personal",
         id_estado__nombre="Activo",
     ).exists()
+    saved_filters = request.session.get("gestion_solicitudes_filtros", {})
+    if not isinstance(saved_filters, dict):
+        saved_filters = {}
+    filter_data = (
+        request.POST
+        if request.method == "POST"
+        else request.GET or saved_filters
+    )
+    type_from_action = {
+        "adopcion": "adopcion",
+        "devolucion": "devolucion",
+        "hogar_temporal": "hogar-temporal",
+    }.get(request.POST.get("tipo_solicitud"), "voluntariado")
+    filtro_tipo = filter_data.get("filtro_tipo") or filter_data.get("tipo")
+    if filtro_tipo not in {
+        "voluntariado",
+        "adopcion",
+        "devolucion",
+        "hogar-temporal",
+    }:
+        filtro_tipo = type_from_action if request.method == "POST" else "voluntariado"
+
+    estado_filtro = filter_data.get("filtro_estado") or filter_data.get("estado")
+    if estado_filtro not in {"pendiente", "aprobada", "rechazada", "todas"}:
+        estado_filtro = "pendiente"
+
+    fecha_filter_data = filter_data.copy()
+    if filtro_tipo == "hogar-temporal":
+        if not fecha_filter_data.get("fecha_desde"):
+            fecha_filter_data["fecha_desde"] = filter_data.get(
+                "hogar-fecha_desde", ""
+            )
+        if not fecha_filter_data.get("fecha_hasta"):
+            fecha_filter_data["fecha_hasta"] = filter_data.get(
+                "hogar-fecha_hasta", ""
+            )
     solicitud_form = GestionSolicitudVoluntariadoForm()
     personal_form = AltaPersonalDesdeSolicitudForm()
     respuesta_adopcion_form = RespuestaSolicitudAdopcionForm()
     respuesta_devolucion_form = RespuestaDevolucionAdopcionForm()
-    filtro_fecha_form = FiltroFechaSolicitudForm(request.GET or None)
+    filtro_fecha_form = FiltroFechaSolicitudForm(fecha_filter_data or None)
     respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm()
     filtro_fecha_hogar_form = FiltroFechaSolicitudForm(
-        request.GET or None,
+        filter_data or None,
         prefix="hogar",
     )
     error = None
-    if request.method == "POST":
+    filter_action = (
+        request.method == "POST"
+        and request.POST.get("accion_filtro") == "actualizar"
+    )
+    if filter_action and request.POST.get("limpiar_fechas"):
+        fecha_filter_data["fecha_desde"] = ""
+        fecha_filter_data["fecha_hasta"] = ""
+        filtro_fecha_form = FiltroFechaSolicitudForm(fecha_filter_data)
+
+    legacy_filter_url = request.method == "GET" and any(
+        key in request.GET
+        for key in (
+            "tipo",
+            "estado",
+            "fecha_desde",
+            "fecha_hasta",
+            "hogar-fecha_desde",
+            "hogar-fecha_hasta",
+        )
+    )
+    if legacy_filter_url and filtro_fecha_form.is_valid():
+        _save_solicitudes_filters(
+            request,
+            filtro_tipo,
+            estado_filtro,
+            filtro_fecha_form.cleaned_data["fecha_desde"],
+            filtro_fecha_form.cleaned_data["fecha_hasta"],
+        )
+        return redirect(
+            f"{resolve_url('gestion_solicitudes')}#{filtro_tipo}"
+        )
+
+    if filter_action:
+        if filtro_fecha_form.is_valid():
+            _save_solicitudes_filters(
+                request,
+                filtro_tipo,
+                estado_filtro,
+                filtro_fecha_form.cleaned_data["fecha_desde"],
+                filtro_fecha_form.cleaned_data["fecha_hasta"],
+            )
+            return redirect(
+                f"{resolve_url('gestion_solicitudes')}#{filtro_tipo}"
+            )
+    elif request.method == "POST":
         if request.POST.get("tipo_solicitud") == "hogar_temporal":
             respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm(request.POST)
             solicitud_id = request.POST.get("solicitud_hogar_id")
@@ -560,8 +639,9 @@ def gestion_solicitudes(request):
                             request,
                             "La solicitud de adopción fue respondida correctamente.",
                         )
-                        return redirect(
-                            f"{reverse('gestion_solicitudes')}#adopcion"
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="adopcion",
                         )
         else:
             solicitud = get_object_or_404(
@@ -628,7 +708,10 @@ def gestion_solicitudes(request):
                                     request,
                                     "El perfil de personal se creó correctamente.",
                                 )
-                                return _redirect_to_filtered_solicitudes(request)
+                                return _redirect_to_filtered_solicitudes(
+                                    request,
+                                    anchor="voluntariado",
+                                )
             else:
                 solicitud_form = GestionSolicitudVoluntariadoForm(
                     request.POST,
@@ -654,7 +737,10 @@ def gestion_solicitudes(request):
                         error = "No pudimos actualizar la solicitud. Inténtalo nuevamente."
                     else:
                         messages.success(request, "La solicitud se actualizó correctamente.")
-                        return _redirect_to_filtered_solicitudes(request)
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="voluntariado",
+                        )
 
     solicitudes_voluntariado = (
         SolicitudVoluntariado.objects.select_related("id_usuario", "id_estado")
@@ -665,19 +751,6 @@ def gestion_solicitudes(request):
         )
         .order_by("-fecha_solicitud", "-id_solicitud_vol")
     )
-    if filtro_fecha_form.is_valid():
-        fecha_desde = filtro_fecha_form.cleaned_data.get("fecha_desde")
-        fecha_hasta = filtro_fecha_form.cleaned_data.get("fecha_hasta")
-        if fecha_desde:
-            solicitudes_voluntariado = solicitudes_voluntariado.filter(
-                fecha_solicitud__gte=fecha_desde
-            )
-        if fecha_hasta:
-            solicitudes_voluntariado = solicitudes_voluntariado.filter(
-                fecha_solicitud__lte=fecha_hasta
-            )
-    elif filtro_fecha_form.errors:
-        solicitudes_voluntariado = solicitudes_voluntariado.none()
     solicitudes_hogar_temporal = (
         SolicitudHogarTemporal.objects.select_related(
             "id_casa",
@@ -688,19 +761,6 @@ def gestion_solicitudes(request):
         )
         .order_by("-fecha_solicitud", "-id_solicitud_hog")
     )
-    if filtro_fecha_hogar_form.is_valid():
-        fecha_desde = filtro_fecha_hogar_form.cleaned_data.get("fecha_desde")
-        fecha_hasta = filtro_fecha_hogar_form.cleaned_data.get("fecha_hasta")
-        if fecha_desde:
-            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
-                fecha_solicitud__gte=fecha_desde
-            )
-        if fecha_hasta:
-            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
-                fecha_solicitud__lte=fecha_hasta
-            )
-    elif filtro_fecha_hogar_form.errors:
-        solicitudes_hogar_temporal = solicitudes_hogar_temporal.none()
     solicitudes_adopcion = SolicitudAdopcion.objects.filter(
         id_estado__tipo_estado="Solicitud",
     ).select_related(
@@ -720,6 +780,81 @@ def gestion_solicitudes(request):
         )
         .order_by("-fecha_devolucion")
     )
+    if filtro_fecha_form.is_valid():
+        fecha_desde = filtro_fecha_form.cleaned_data.get("fecha_desde")
+        fecha_hasta = filtro_fecha_form.cleaned_data.get("fecha_hasta")
+        queryset_dates = {
+            "voluntariado": (solicitudes_voluntariado, "fecha_solicitud"),
+            "adopcion": (solicitudes_adopcion, "fecha_solicitud"),
+            "devolucion": (solicitudes_devolucion, "fecha_devolucion"),
+            "hogar-temporal": (solicitudes_hogar_temporal, "fecha_solicitud"),
+        }
+        solicitudes_por_tipo, campo_fecha = queryset_dates[filtro_tipo]
+        if fecha_desde:
+            solicitudes_por_tipo = solicitudes_por_tipo.filter(
+                **{f"{campo_fecha}__gte": fecha_desde}
+            )
+        if fecha_hasta:
+            solicitudes_por_tipo = solicitudes_por_tipo.filter(
+                **{f"{campo_fecha}__lte": fecha_hasta}
+            )
+        if filtro_tipo == "voluntariado":
+            solicitudes_voluntariado = solicitudes_por_tipo
+        elif filtro_tipo == "adopcion":
+            solicitudes_adopcion = solicitudes_por_tipo
+        elif filtro_tipo == "devolucion":
+            solicitudes_devolucion = solicitudes_por_tipo
+        else:
+            solicitudes_hogar_temporal = solicitudes_por_tipo
+    elif filtro_fecha_form.errors:
+        if filtro_tipo == "voluntariado":
+            solicitudes_voluntariado = solicitudes_voluntariado.none()
+        elif filtro_tipo == "adopcion":
+            solicitudes_adopcion = solicitudes_adopcion.none()
+        elif filtro_tipo == "devolucion":
+            solicitudes_devolucion = solicitudes_devolucion.none()
+        else:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.none()
+    if filtro_fecha_hogar_form.is_valid() and (
+        filter_data.get("hogar-fecha_desde")
+        or filter_data.get("hogar-fecha_hasta")
+    ):
+        fecha_desde = filtro_fecha_hogar_form.cleaned_data.get("fecha_desde")
+        fecha_hasta = filtro_fecha_hogar_form.cleaned_data.get("fecha_hasta")
+        if fecha_desde:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
+                fecha_solicitud__gte=fecha_desde
+            )
+        if fecha_hasta:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
+                fecha_solicitud__lte=fecha_hasta
+            )
+    elif filtro_fecha_hogar_form.errors and filtro_tipo == "hogar-temporal":
+        solicitudes_hogar_temporal = solicitudes_hogar_temporal.none()
+    estado_por_filtro = {
+        "pendiente": ("Pendiente", "En Revisión", "Registrada"),
+        "aprobada": ("Aprobada",),
+        "rechazada": ("Rechazada",),
+    }
+    estados_solicitud = estado_por_filtro.get(estado_filtro)
+    if estados_solicitud:
+        solicitudes_voluntariado = solicitudes_voluntariado.filter(
+            id_estado__nombre__in=estados_solicitud
+        )
+        solicitudes_adopcion = solicitudes_adopcion.filter(
+            id_estado__nombre__in=estados_solicitud
+        )
+        solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
+            id_estado__nombre__in=estados_solicitud
+        )
+        estados_devolucion = (
+            ("Registrada",)
+            if estado_filtro == "pendiente"
+            else estados_solicitud
+        )
+        solicitudes_devolucion = solicitudes_devolucion.filter(
+            id_estado__nombre__in=estados_devolucion
+        )
     return render(
         request,
         "gestion_solicitudes.html",
@@ -738,6 +873,16 @@ def gestion_solicitudes(request):
             "es_admin": es_admin,
             "filtro_fecha_form": filtro_fecha_form,
             "filtro_fecha_hogar_form": filtro_fecha_hogar_form,
+            "filtro_tipo": filtro_tipo,
+            "estado_filtro": estado_filtro,
+            "fecha_desde_filtro": filtro_fecha_form["fecha_desde"].value() or "",
+            "fecha_hasta_filtro": filtro_fecha_form["fecha_hasta"].value() or "",
+            "estado_filtro_opciones": (
+                ("pendiente", "Pendientes"),
+                ("aprobada", "Aprobadas"),
+                ("rechazada", "Rechazadas"),
+                ("todas", "Todas"),
+            ),
             "error": error,
             "personal": personal,
         },
@@ -766,20 +911,67 @@ def gestion_solicitudes(request):
     )
 
 
+def _save_solicitudes_filters(
+    request,
+    tipo_filtro,
+    estado_filtro,
+    fecha_desde,
+    fecha_hasta,
+):
+    request.session["gestion_solicitudes_filtros"] = {
+        "tipo": tipo_filtro,
+        "estado": estado_filtro,
+        "fecha_desde": fecha_desde.isoformat() if fecha_desde else "",
+        "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else "",
+    }
+
+
 def _redirect_to_filtered_solicitudes(request, anchor=None):
-    query_params = {
-        key: value
-        for key, value in {
+    tipo_filtro = request.POST.get("filtro_tipo") or {
+        "adopcion": "adopcion",
+        "devolucion": "devolucion",
+        "hogar_temporal": "hogar-temporal",
+    }.get(request.POST.get("tipo_solicitud"), "voluntariado")
+    if tipo_filtro not in {
+        "voluntariado",
+        "adopcion",
+        "devolucion",
+        "hogar-temporal",
+    }:
+        tipo_filtro = "voluntariado"
+    estado_filtro = request.POST.get("filtro_estado", "pendiente")
+    if estado_filtro not in {"pendiente", "aprobada", "rechazada", "todas"}:
+        estado_filtro = "pendiente"
+    filtro_fecha_form = FiltroFechaSolicitudForm(
+        {
             "fecha_desde": request.POST.get("fecha_desde", ""),
             "fecha_hasta": request.POST.get("fecha_hasta", ""),
-            "hogar-fecha_desde": request.POST.get("hogar-fecha_desde", ""),
-            "hogar-fecha_hasta": request.POST.get("hogar-fecha_hasta", ""),
-        }.items()
-        if value
-    }
+        }
+    )
+    saved_filters = request.session.get("gestion_solicitudes_filtros", {})
+    if filtro_fecha_form.is_valid():
+        fecha_desde = filtro_fecha_form.cleaned_data["fecha_desde"]
+        fecha_hasta = filtro_fecha_form.cleaned_data["fecha_hasta"]
+    else:
+        fecha_desde = saved_filters.get("fecha_desde", "")
+        fecha_hasta = saved_filters.get("fecha_hasta", "")
+        filtro_fecha_form = FiltroFechaSolicitudForm(
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        )
+        if filtro_fecha_form.is_valid():
+            fecha_desde = filtro_fecha_form.cleaned_data["fecha_desde"]
+            fecha_hasta = filtro_fecha_form.cleaned_data["fecha_hasta"]
+        else:
+            fecha_desde = None
+            fecha_hasta = None
+    _save_solicitudes_filters(
+        request,
+        tipo_filtro,
+        estado_filtro,
+        fecha_desde,
+        fecha_hasta,
+    )
     destination = resolve_url("gestion_solicitudes")
-    if query_params:
-        destination = f"{destination}?{urlencode(query_params)}"
     if anchor:
         destination = f"{destination}#{anchor}"
     return redirect(destination)

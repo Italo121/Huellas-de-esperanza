@@ -405,6 +405,162 @@ class SolicitudVoluntariadoTests(SimpleTestCase):
 
 
 class GestionSolicitudesTests(SimpleTestCase):
+    def test_selected_request_type_is_filtered_by_status_and_date(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {
+            "refugio_usuario": {"id": "staff-user"},
+            "gestion_solicitudes_filtros": {
+                "tipo": "adopcion",
+                "estado": "rechazada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        }
+        volunteer_queryset = MagicMock()
+        volunteer_queryset.annotate.return_value.order_by.return_value = (
+            volunteer_queryset
+        )
+        home_queryset = MagicMock()
+        home_queryset.select_related.return_value.order_by.return_value = (
+            home_queryset
+        )
+        adoption_queryset = MagicMock()
+        adoption_queryset.select_related.return_value = adoption_queryset
+        adoption_queryset.filter.return_value = adoption_queryset
+        return_queryset = MagicMock()
+        return_queryset.select_related.return_value.order_by.return_value = (
+            return_queryset
+        )
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="staff-rut", rol="cuidador"),
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
+                return_value=volunteer_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudHogarTemporal.objects.select_related",
+                return_value=home_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.filter",
+                return_value=adoption_queryset,
+            ) as adoption_filter,
+            patch(
+                "mod_refugio.views.DevolucionAdopcion.objects.filter",
+                return_value=return_queryset,
+            ),
+            patch(
+                "mod_refugio.views.render",
+                return_value=HttpResponse("requests"),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            render_mock.call_args.args[2]["filtro_tipo"],
+            "adopcion",
+        )
+        self.assertEqual(
+            render_mock.call_args.args[2]["estado_filtro"],
+            "rechazada",
+        )
+        adoption_filter.assert_called_once_with(
+            id_estado__tipo_estado="Solicitud",
+        )
+        adoption_queryset.filter.assert_any_call(
+            fecha_solicitud__gte=date(2026, 10, 1)
+        )
+        adoption_queryset.filter.assert_any_call(
+            fecha_solicitud__lte=date(2026, 10, 31)
+        )
+        adoption_queryset.filter.assert_any_call(
+            id_estado__nombre__in=("Rechazada",)
+        )
+
+    def test_filter_post_redirects_cleanly_and_stores_filters_in_session(self):
+        request = RequestFactory().post(
+            "/refugio/solicitudes/",
+            {
+                "accion_filtro": "actualizar",
+                "filtro_tipo": "adopcion",
+                "filtro_estado": "rechazada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="staff-rut", rol="cuidador"),
+            ),
+            patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.gestion_solicitudes(request)
+
+        parsed_url = urlsplit(response.url)
+        self.assertEqual(parsed_url.path, reverse("gestion_solicitudes"))
+        self.assertEqual(parsed_url.query, "")
+        self.assertEqual(parsed_url.fragment, "adopcion")
+        self.assertEqual(
+            request.session["gestion_solicitudes_filtros"],
+            {
+                "tipo": "adopcion",
+                "estado": "rechazada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+
+    def test_legacy_filter_url_redirects_to_clean_session_url(self):
+        request = RequestFactory().get(
+            "/refugio/solicitudes/",
+            {
+                "tipo": "hogar-temporal",
+                "estado": "aprobada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="staff-rut", rol="cuidador"),
+            ),
+            patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(
+            response.url,
+            f"{reverse('gestion_solicitudes')}#hogar-temporal",
+        )
+        self.assertEqual(
+            request.session["gestion_solicitudes_filtros"],
+            {
+                "tipo": "hogar-temporal",
+                "estado": "aprobada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+
     def test_date_filter_accepts_start_only_end_only_or_period(self):
         test_cases = (
             {"fecha_desde": "2026-10-01"},
@@ -426,16 +582,18 @@ class GestionSolicitudesTests(SimpleTestCase):
         self.assertIn("fecha_hasta", form.errors)
 
     def test_list_view_filters_applications_by_both_dates(self):
-        request = RequestFactory().get(
-            "/refugio/solicitudes/",
-            {
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {
+            "refugio_usuario": {"id": "staff-user"},
+            "gestion_solicitudes_filtros": {
+                "tipo": "voluntariado",
+                "estado": "pendiente",
                 "fecha_desde": "2026-10-01",
                 "fecha_hasta": "2026-10-31",
                 "hogar-fecha_desde": "2026-10-01",
                 "hogar-fecha_hasta": "2026-10-31",
             },
-        )
-        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        }
         queryset = MagicMock()
         queryset.order_by.return_value = queryset
         queryset.filter.return_value = queryset
@@ -543,7 +701,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, f"{path}#hogar-temporal")
+        self.assertEqual(
+            response.url,
+            f"{path}#hogar-temporal",
+        )
         self.assertIs(solicitud.id_estado, estado_aprobado)
         self.assertEqual(solicitud.observacion, "Postulación aprobada.")
         self.assertEqual(solicitud.rut_personal, personal)
@@ -622,7 +783,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, f"{path}#adopcion")
+        self.assertEqual(
+            response.url,
+            f"{path}#adopcion",
+        )
         self.assertIs(solicitud.id_estado, estado_aprobado)
         self.assertEqual(solicitud.respuesta, "Aprobada")
         self.assertEqual(solicitud.respondida_por, personal)
@@ -706,7 +870,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, f"{path}#adopcion")
+        self.assertEqual(
+            response.url,
+            f"{path}#adopcion",
+        )
         self.assertIs(solicitud.id_estado, estado_rechazado)
         self.assertEqual(animal.id_estado, estado_disponible.pk)
         animal.save.assert_called_once_with(update_fields=("id_estado",))
@@ -781,7 +948,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, f"{path}#devolucion")
+        self.assertEqual(
+            response.url,
+            f"{path}#devolucion",
+        )
         self.assertEqual(adopcion.fecha_termino, views.timezone.localdate())
         adopcion.save.assert_called_once_with(update_fields=("fecha_termino",))
         self.assertEqual(animal.id_estado, estado_disponible.pk)
@@ -950,8 +1120,19 @@ class GestionSolicitudesTests(SimpleTestCase):
         adoption_filter.assert_called_once_with(
             id_estado__tipo_estado="Solicitud",
         )
+        adoption_filter.return_value.select_related.return_value.filter.assert_any_call(
+            id_estado__nombre__in=("Pendiente", "En Revisión", "Registrada")
+        )
         self.assertTrue(
             render_mock.call_args.args[2]["puede_ver_solicitudes_adopcion"]
+        )
+        self.assertEqual(
+            render_mock.call_args.args[2]["filtro_tipo"],
+            "voluntariado",
+        )
+        self.assertEqual(
+            render_mock.call_args.args[2]["estado_filtro"],
+            "pendiente",
         )
         self.assertFalse(
             render_mock.call_args.args[2]["puede_gestionar_adopciones"]
@@ -982,6 +1163,8 @@ class GestionSolicitudesTests(SimpleTestCase):
         html = render_to_string(
             "gestion_solicitudes.html",
             {
+                "filtro_tipo": "adopcion",
+                "estado_filtro": "pendiente",
                 "solicitudes_voluntariado": [],
                 "solicitudes_adopcion": [solicitud],
                 "puede_ver_solicitudes_adopcion": True,
@@ -997,6 +1180,8 @@ class GestionSolicitudesTests(SimpleTestCase):
         )
 
         self.assertIn("Luna", html)
+        self.assertNotIn("Solicitudes de voluntariado", html)
+        self.assertNotIn("Solicitudes de hogar temporal", html)
         self.assertIn("Solo el personal activo puede responder esta solicitud.", html)
         self.assertNotIn('name="tipo_solicitud" value="adopcion"', html)
 
@@ -1027,6 +1212,8 @@ class GestionSolicitudesTests(SimpleTestCase):
         html = render_to_string(
             "gestion_solicitudes.html",
             {
+                "filtro_tipo": "devolucion",
+                "estado_filtro": "pendiente",
                 "solicitudes_voluntariado": [],
                 "solicitudes_adopcion": [],
                 "solicitudes_devolucion": [devolucion],
@@ -1134,7 +1321,10 @@ class GestionSolicitudesTests(SimpleTestCase):
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("gestion_solicitudes"))
+        self.assertEqual(
+            response.url,
+            f"{reverse('gestion_solicitudes')}#voluntariado",
+        )
         self.assertEqual(updated_application.fecha_respuesta, date(2026, 10, 28))
         updated_application.save.assert_called_once_with(
             update_fields=("id_estado", "observacion", "fecha_respuesta")
