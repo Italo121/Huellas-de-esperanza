@@ -36,16 +36,36 @@
             <form method="get" action="{% url 'gestion_salud_animal' %}"
                   class="row g-2 align-items-end">
                 <div class="col-12 col-md-8">
-                    <label class="form-label" for="animal-select">Animal</label>
-                    <select class="form-select" name="animal" id="animal-select" required>
-                        <option value="">Selecciona un animal</option>
+                    <label class="form-label" for="animal-search">Animal</label>
+                    <div class="position-relative" id="animal-combobox">
+                        <input class="form-control" type="text" id="animal-search"
+                               role="combobox" aria-autocomplete="list"
+                               aria-haspopup="listbox" aria-expanded="false"
+                               aria-controls="animal-options" autocomplete="off"
+                               placeholder="Escribe el nombre o la especie" required
+                               value="{% if animal %}{{ animal.nombre|default:'Sin nombre' }} · {{ animal.especie|capfirst }}{% endif %}">
+                        <input type="hidden" name="animal" id="animal-id"
+                               value="{% if animal %}{{ animal.pk }}{% endif %}">
+                        <div class="list-group position-absolute top-100 start-0 w-100 shadow"
+                             id="animal-options" role="listbox" hidden
+                             style="z-index: 1050; max-height: 16rem; overflow-y: auto;">
                         {% for option in animales %}
-                        <option value="{{ option.pk }}"
-                                {% if animal and animal.pk == option.pk %}selected{% endif %}>
-                            {{ option.nombre|default:"Sin nombre" }} · {{ option.especie|capfirst }}
-                        </option>
+                            <button class="list-group-item list-group-item-action text-start"
+                                    type="button" role="option" data-animal-option
+                                    id="animal-option-{{ option.pk }}"
+                                    data-value="{{ option.pk }}"
+                                    aria-selected="{% if animal and animal.pk == option.pk %}true{% else %}false{% endif %}">
+                                {{ option.nombre|default:"Sin nombre" }} · {{ option.especie|capfirst }}
+                            </button>
                         {% endfor %}
-                    </select>
+                            <div class="list-group-item small text-secondary"
+                                 id="animal-no-results" role="option" aria-disabled="true" hidden>
+                                No se encontraron animales
+                            </div>
+                        </div>
+                        <span class="visually-hidden" id="animal-search-status"
+                              aria-live="polite"></span>
+                    </div>
                 </div>
                 <div class="col-12 col-md-auto">
                     <button class="btn btn-success" type="submit">
@@ -242,4 +262,136 @@
         </div>
         {% endif %}
     </main>
+    <script>
+        const animalSearch = document.getElementById("animal-search");
+        const animalId = document.getElementById("animal-id");
+        const animalCombobox = document.getElementById("animal-combobox");
+        const animalListbox = document.getElementById("animal-options");
+
+        if (animalSearch && animalId && animalCombobox && animalListbox) {
+            const animalOptions = Array.from(
+                animalListbox.querySelectorAll("[data-animal-option]")
+            );
+            const noResults = document.getElementById("animal-no-results");
+            const searchStatus = document.getElementById("animal-search-status");
+            const normalize = (value) => value
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLocaleLowerCase();
+            let matchingOptions = [];
+            let activeIndex = -1;
+
+            const setActiveOption = (index) => {
+                activeIndex = index;
+                animalOptions.forEach((option) => option.classList.remove("active"));
+
+                if (activeIndex >= 0 && activeIndex < matchingOptions.length) {
+                    const activeOption = matchingOptions[activeIndex];
+                    activeOption.classList.add("active");
+                    animalSearch.setAttribute("aria-activedescendant", activeOption.id);
+                    activeOption.scrollIntoView({ block: "nearest" });
+                } else {
+                    animalSearch.removeAttribute("aria-activedescendant");
+                }
+            };
+
+            const closeListbox = () => {
+                animalListbox.hidden = true;
+                animalSearch.setAttribute("aria-expanded", "false");
+                setActiveOption(-1);
+            };
+
+            const showMatchingOptions = () => {
+                const searchTerm = normalize(animalSearch.value.trim());
+                matchingOptions = animalOptions.filter((option) => {
+                    const matches = normalize(option.textContent).includes(searchTerm);
+                    option.hidden = !matches;
+                    return matches;
+                });
+                noResults.hidden = matchingOptions.length > 0;
+                animalListbox.hidden = false;
+                animalSearch.setAttribute("aria-expanded", "true");
+                searchStatus.textContent = matchingOptions.length
+                    ? `${matchingOptions.length} ${matchingOptions.length === 1 ? "animal disponible" : "animales disponibles"}.`
+                    : "No se encontraron animales.";
+                setActiveOption(-1);
+            };
+
+            const chooseAnimal = (option) => {
+                animalSearch.value = option.textContent.trim();
+                animalId.value = option.dataset.value;
+                animalSearch.setCustomValidity("");
+                animalOptions.forEach((animalOption) => {
+                    animalOption.setAttribute(
+                        "aria-selected",
+                        animalOption === option ? "true" : "false"
+                    );
+                });
+                searchStatus.textContent = `Animal seleccionado: ${animalSearch.value}.`;
+                closeListbox();
+            };
+
+            animalSearch.setCustomValidity(
+                animalId.value ? "" : "Selecciona un animal de las opciones."
+            );
+            animalSearch.addEventListener("focus", showMatchingOptions);
+            animalSearch.addEventListener("input", () => {
+                animalId.value = "";
+                animalSearch.setCustomValidity("Selecciona un animal de las opciones.");
+                animalOptions.forEach((option) => {
+                    option.setAttribute("aria-selected", "false");
+                });
+                showMatchingOptions();
+            });
+            animalSearch.addEventListener("keydown", (event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (animalListbox.hidden) showMatchingOptions();
+                    if (matchingOptions.length) {
+                        const direction = event.key === "ArrowDown" ? 1 : -1;
+                        const nextIndex = activeIndex + direction;
+                        const wrappedIndex = nextIndex < 0
+                            ? matchingOptions.length - 1
+                            : nextIndex % matchingOptions.length;
+                        setActiveOption(wrappedIndex);
+                    }
+                } else if (event.key === "Enter" && activeIndex >= 0) {
+                    event.preventDefault();
+                    chooseAnimal(matchingOptions[activeIndex]);
+                } else if (event.key === "Escape" && !animalListbox.hidden) {
+                    event.preventDefault();
+                    closeListbox();
+                }
+            });
+
+            animalListbox.addEventListener("mousedown", (event) => {
+                if (event.target.closest("[data-animal-option]")) {
+                    event.preventDefault();
+                }
+            });
+            animalListbox.addEventListener("click", (event) => {
+                const option = event.target.closest("[data-animal-option]");
+                if (option) chooseAnimal(option);
+            });
+            animalListbox.addEventListener("pointermove", (event) => {
+                const option = event.target.closest("[data-animal-option]");
+                if (option) setActiveOption(matchingOptions.indexOf(option));
+            });
+            animalCombobox.addEventListener("focusout", (event) => {
+                if (!animalCombobox.contains(event.relatedTarget)) closeListbox();
+            });
+            document.addEventListener("click", (event) => {
+                if (!animalCombobox.contains(event.target)) closeListbox();
+            });
+
+            if (animalId.value) {
+                const selectedOption = animalOptions.find(
+                    (option) => option.dataset.value === animalId.value
+                );
+                if (selectedOption) {
+                    selectedOption.setAttribute("aria-selected", "true");
+                }
+            }
+        }
+    </script>
 {% endblock %}
