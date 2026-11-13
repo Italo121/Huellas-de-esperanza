@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from mod_refugio.models import Animal, Personal, Usuario, VacunaAnimal
+from mod_refugio.models import Animal, Personal, Rescate, Usuario, VacunaAnimal
 
 from .forms import SolicitudAdopcionForm, SolicitudDevolucionAdopcionForm
 from .models import (
@@ -83,6 +83,29 @@ def detalle_animal(request, id_animal):
         Animal,
         id_animal=id_animal
     )
+    rescate = (
+        Rescate.objects.select_related(
+            "id_estado",
+            "rut_personal",
+            "rut_personal__id_usuario",
+        )
+        .filter(pk=animal.id_rescate)
+        .first()
+    )
+    personal_nombre = None
+    if rescate and rescate.rut_personal.id_usuario:
+        usuario = rescate.rut_personal.id_usuario
+        personal_nombre = " ".join(
+            parte
+            for parte in (
+                usuario.p_nombre,
+                usuario.s_nombre,
+                usuario.ap_paterno,
+                usuario.ap_materno,
+            )
+            if parte
+        )
+
     vacunas_animal = (
         VacunaAnimal.objects.select_related("id_vacuna")
         .filter(id_animal=animal)
@@ -126,6 +149,8 @@ def detalle_animal(request, id_animal):
         "detalle-animal.html",
         {
             "animal": animal,
+            "rescate": rescate,
+            "personal_nombre": personal_nombre,
             "vacunas_animal": vacunas_animal,
             "solicitud_existente": solicitud_existente,
             "solicitud_rechazada": solicitud_rechazada,
@@ -337,7 +362,7 @@ def solicitar_devolucion(request, id_adopcion):
             request,
             "Completa correctamente los datos de la solicitud de devolución.",
         )
-        return redirect("mod_adopcion:mis_adopciones")
+        return redirect("mod_adopcion:mis_solicitudes")
 
     try:
         with transaction.atomic():
@@ -355,7 +380,7 @@ def solicitar_devolucion(request, id_adopcion):
                     request,
                     "Ya existe una solicitud de devolución para esta adopción.",
                 )
-                return redirect("mod_adopcion:mis_adopciones")
+                return redirect("mod_adopcion:mis_solicitudes")
 
             estado_registrada = Estado.objects.filter(
                 tipo_estado="Devolucion",
@@ -371,7 +396,7 @@ def solicitar_devolucion(request, id_adopcion):
                     "No es posible enviar la solicitud porque el refugio no tiene "
                     "configurado el estado Registrada para devoluciones.",
                 )
-                return redirect("mod_adopcion:mis_adopciones")
+                return redirect("mod_adopcion:mis_solicitudes")
 
             datos = form.cleaned_data
             DevolucionAdopcion.objects.create(
@@ -394,13 +419,13 @@ def solicitar_devolucion(request, id_adopcion):
             request,
             "No pudimos enviar la solicitud de devolución. Inténtalo nuevamente más tarde.",
         )
-        return redirect("mod_adopcion:mis_adopciones")
+        return redirect("mod_adopcion:mis_solicitudes")
 
     messages.success(
         request,
         "Tu solicitud de devolución fue enviada al refugio para su evaluación.",
     )
-    return redirect("mod_adopcion:mis_adopciones")
+    return redirect("mod_adopcion:mis_solicitudes")
 
 
 def mis_solicitudes(request):
