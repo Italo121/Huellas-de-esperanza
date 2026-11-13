@@ -12,6 +12,7 @@ from django.test import RequestFactory
 from django.urls import resolve, reverse
 
 from .forms import (
+    FechaTerminoAdopcionForm,
     RespuestaSolicitudAdopcionForm,
     SolicitudAdopcionForm,
     SolicitudDevolucionAdopcionForm,
@@ -147,8 +148,54 @@ class SolicitudAdopcionUrlTests(SimpleTestCase):
         self.assertEqual(path, "/adopcion/mis-adopciones/7/devolver/")
         self.assertIs(resolve(path).func, views.solicitar_devolucion)
 
+    def test_edit_end_date_route_resolves_to_staff_view(self):
+        path = reverse(
+            "mod_adopcion:editar_fecha_termino",
+            kwargs={"id_adopcion": 7},
+        )
+
+        self.assertEqual(path, "/adopcion/seguimiento/7/fecha-termino/")
+        self.assertIs(resolve(path).func, views.editar_fecha_termino)
+
+
+class FechaTerminoAdopcionFormTests(SimpleTestCase):
+    def test_allows_empty_date_to_reopen_follow_up(self):
+        form = FechaTerminoAdopcionForm(
+            {"fecha_termino": ""},
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+        self.assertTrue(form.is_valid())
+        self.assertIsNone(form.cleaned_data["fecha_termino"])
+
+    def test_rejects_end_date_before_adoption_start(self):
+        form = FechaTerminoAdopcionForm(
+            {"fecha_termino": "2025-12-31"},
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("fecha_termino", form.errors)
+
+    def test_accepts_end_date_on_or_after_adoption_start(self):
+        form = FechaTerminoAdopcionForm(
+            {"fecha_termino": "2026-01-01"},
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["fecha_termino"], date(2026, 1, 1))
+
 
 class SeguimientoAdopcionAccessTests(SimpleTestCase):
+    def test_end_date_only_finalizes_follow_up_when_date_is_reached(self):
+        today = date(2026, 11, 13)
+
+        self.assertFalse(views._adopcion_finalizada(None, today))
+        self.assertFalse(views._adopcion_finalizada(date(2026, 11, 14), today))
+        self.assertTrue(views._adopcion_finalizada(today, today))
+        self.assertTrue(views._adopcion_finalizada(date(2026, 11, 12), today))
+
     def test_anonymous_user_is_redirected_from_follow_up_list(self):
         request = RequestFactory().get("/adopcion/seguimiento/")
         request.session = {}
@@ -191,7 +238,7 @@ class SeguimientoAdopcionAccessTests(SimpleTestCase):
     def test_personal_can_access_follow_up_list(self):
         request = RequestFactory().get("/adopcion/seguimiento/")
         request.session = {"refugio_usuario": {"id": "staff-user"}}
-        adopciones = [SimpleNamespace(id_adopcion=2)]
+        adopciones = [SimpleNamespace(id_adopcion=2, fecha_termino=None)]
 
         with (
             patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
@@ -212,13 +259,95 @@ class SeguimientoAdopcionAccessTests(SimpleTestCase):
             render_mock.call_args.args[2]["adopciones"],
             adopciones,
         )
+        self.assertEqual(
+            render_mock.call_args.args[2]["adopciones_finalizadas"],
+            set(),
+        )
+
+    def test_staff_can_update_adoption_end_date(self):
+        request = RequestFactory().post(
+            "/adopcion/seguimiento/7/fecha-termino/",
+            {"fecha_termino": "2026-12-01"},
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        adopcion = SimpleNamespace(
+            id_adopcion=7,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_termino=None,
+            save=Mock(),
+        )
+
+        with (
+            patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_adopcion.views.get_object_or_404",
+                return_value=adopcion,
+            ) as buscar,
+            patch("mod_adopcion.views.messages.success") as success,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.editar_fecha_termino(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            reverse("mod_adopcion:detalle_adopcion", args=(7,))
+            + "#fecha-termino",
+        )
+        buscar.assert_called_once_with(views.Adopcion, id_adopcion=7)
+        self.assertEqual(adopcion.fecha_termino, date(2026, 12, 1))
+        adopcion.save.assert_called_once_with(update_fields=("fecha_termino",))
+        success.assert_called_once()
+
+    def test_non_staff_cannot_update_adoption_end_date(self):
+        request = RequestFactory().post(
+            "/adopcion/seguimiento/7/fecha-termino/",
+            {"fecha_termino": "2026-12-01"},
+        )
+        request.session = {"refugio_usuario": {"id": "public-user"}}
+
+        with (
+            patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
+            patch("mod_adopcion.views.get_object_or_404") as buscar,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.editar_fecha_termino(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 403)
+        buscar.assert_not_called()
+
+    def test_update_rejects_end_date_before_start(self):
+        request = RequestFactory().post(
+            "/adopcion/seguimiento/7/fecha-termino/",
+            {"fecha_termino": "2025-12-31"},
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        adopcion = SimpleNamespace(
+            id_adopcion=7,
+            fecha_inicio=date(2026, 1, 1),
+            fecha_termino=None,
+            save=Mock(),
+        )
+
+        with (
+            patch("mod_adopcion.views.Personal.objects.filter") as personal_filter,
+            patch("mod_adopcion.views.get_object_or_404", return_value=adopcion),
+            patch("mod_adopcion.views.messages.error") as error,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.editar_fecha_termino(request, id_adopcion=7)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(adopcion.fecha_termino)
+        adopcion.save.assert_not_called()
+        error.assert_called_once()
 
 
 class SolicitudAdopcionViewTests(SimpleTestCase):
     def test_my_adoptions_includes_return_request_outcome(self):
         request = RequestFactory().get("/adopcion/mis-adopciones/")
         request.session = {"refugio_usuario": {"id": "user-uuid"}}
-        adopcion = SimpleNamespace(id_adopcion=7)
+        adopcion = SimpleNamespace(id_adopcion=7, fecha_termino=None)
 
         with (
             patch("mod_adopcion.views.Adopcion.objects.filter") as adoption_filter,
@@ -267,6 +396,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             "mis-adopciones.html",
             {
                 "adopciones": [adopcion],
+                "adopciones_finalizadas": set(),
                 "devoluciones_solicitadas": set(),
                 "devoluciones_aprobadas": set(),
                 "devoluciones_rechazadas": set(),
@@ -300,6 +430,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             "mis-adopciones.html",
             {
                 "adopciones": [adopcion],
+                "adopciones_finalizadas": set(),
                 "devoluciones_solicitadas": {7},
                 "devoluciones_aprobadas": set(),
                 "devoluciones_rechazadas": set(),
@@ -329,6 +460,7 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             "mis-adopciones.html",
             {
                 "adopciones": [adopcion],
+                "adopciones_finalizadas": {7},
                 "devoluciones_solicitadas": {7},
                 "devoluciones_aprobadas": {7},
                 "devoluciones_rechazadas": set(),
@@ -408,8 +540,14 @@ class SolicitudAdopcionViewTests(SimpleTestCase):
             {
                 "id_adopcion": 7,
                 "id_usuario__supabase_uid": "user-uuid",
-                "fecha_termino__isnull": True,
             },
+        )
+        self.assertEqual(
+            lock_adoption.return_value.filter.call_args.args[0],
+            views.Q(
+                fecha_termino__isnull=True
+            )
+            | views.Q(fecha_termino__gt=views.timezone.localdate()),
         )
         state_filter.assert_called_once_with(
             tipo_estado="Devolucion",

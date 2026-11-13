@@ -81,7 +81,7 @@
                         <tr
                             class="fila-adopcion"
                             data-busqueda="{{ adopcion.id_animal.nombre|default:''|lower }} {{ adopcion.id_usuario.p_nombre|default:''|lower }} {{ adopcion.id_usuario.ap_paterno|default:''|lower }}"
-                            data-estado="{% if adopcion.fecha_termino %}finalizada{% else %}proceso{% endif %}"
+                            data-estado="{% if adopcion.id_adopcion in adopciones_finalizadas %}finalizada{% else %}proceso{% endif %}"
                         >
                             <td class="text-muted">
                                 #{{ adopcion.id_adopcion }}
@@ -126,7 +126,7 @@
                             </td>
 
                             <td>
-                                {% if adopcion.fecha_termino %}
+                                {% if adopcion.id_adopcion in adopciones_finalizadas %}
                                     <span class="badge rounded-pill text-bg-success">
                                         <i class="bi bi-check-circle me-1"></i>
                                         Finalizada

@@ -483,7 +483,11 @@ def gestion_solicitudes(request):
                                 animal = Animal.objects.select_for_update().get(
                                     pk=adopcion.id_animal_id
                                 )
-                                if adopcion.fecha_termino is not None:
+                                if (
+                                    adopcion.fecha_termino is not None
+                                    and adopcion.fecha_termino
+                                    <= timezone.localdate()
+                                ):
                                     error = (
                                         "La adopción ya fue finalizada y no se puede "
                                         "responder esta devolución."

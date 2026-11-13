@@ -3,6 +3,7 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.db import DatabaseError, transaction
+from django.db.models import Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render, resolve_url
 from django.urls import reverse
@@ -11,7 +12,11 @@ from django.views.decorators.http import require_POST
 
 from mod_refugio.models import Animal, Personal, Rescate, Usuario, VacunaAnimal
 
-from .forms import SolicitudAdopcionForm, SolicitudDevolucionAdopcionForm
+from .forms import (
+    FechaTerminoAdopcionForm,
+    SolicitudAdopcionForm,
+    SolicitudDevolucionAdopcionForm,
+)
 from .models import (
     Adopcion,
     DevolucionAdopcion,
@@ -22,6 +27,22 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _adopcion_finalizada(fecha_termino, fecha_actual=None):
+    if fecha_actual is None:
+        fecha_actual = timezone.localdate()
+    return fecha_termino is not None and fecha_termino <= fecha_actual
+
+
+def _ids_adopciones_finalizadas(adopciones, fecha_actual=None):
+    if fecha_actual is None:
+        fecha_actual = timezone.localdate()
+    return {
+        adopcion.id_adopcion
+        for adopcion in adopciones
+        if _adopcion_finalizada(adopcion.fecha_termino, fecha_actual)
+    }
 
 
 def _estado_animal_disponible():
@@ -187,10 +208,14 @@ def listar_seguimientos(request):
         .order_by("-fecha_inicio")
     )
 
+    adopciones = list(adopciones)
     return render(
         request,
         "seguimiento-adopciones.html",
-        {"adopciones": adopciones}
+        {
+            "adopciones": adopciones,
+            "adopciones_finalizadas": _ids_adopciones_finalizadas(adopciones),
+        }
     )
 
 
@@ -223,11 +248,61 @@ def detalle_adopcion(request, id_adopcion):
         "detalle-adopcion.html",
         {
             "adopcion": adopcion,
+            "adopcion_finalizada": _adopcion_finalizada(
+                adopcion.fecha_termino
+            ),
             "seguimientos": seguimientos,
             "es_personal": True,
             "estados_seguimiento": estados_seguimiento,
         }
     )
+
+
+@require_POST
+def editar_fecha_termino(request, id_adopcion):
+    access_denied = _personal_access_denied(request)
+    if access_denied:
+        return access_denied
+
+    adopcion = get_object_or_404(Adopcion, id_adopcion=id_adopcion)
+    form = FechaTerminoAdopcionForm(
+        request.POST,
+        fecha_inicio=adopcion.fecha_inicio,
+    )
+    detalle_url = reverse(
+        "mod_adopcion:detalle_adopcion",
+        args=(id_adopcion,),
+    )
+    if not form.is_valid():
+        messages.error(
+            request,
+            form.errors["fecha_termino"][0],
+        )
+        return redirect(f"{detalle_url}#fecha-termino")
+
+    adopcion.fecha_termino = form.cleaned_data["fecha_termino"]
+    try:
+        adopcion.save(update_fields=("fecha_termino",))
+    except DatabaseError:
+        logger.exception(
+            "No se pudo actualizar la fecha de término de la adopción %s",
+            id_adopcion,
+        )
+        messages.error(request, "No se pudo actualizar la fecha de término.")
+        return redirect(f"{detalle_url}#fecha-termino")
+
+    if adopcion.fecha_termino is None:
+        messages.success(
+            request,
+            "Se quitó la fecha de término y la adopción continúa en proceso.",
+        )
+    else:
+        messages.success(
+            request,
+            "Se actualizó la fecha de término de la adopción.",
+        )
+    return redirect(f"{detalle_url}#fecha-termino")
+
 
 @require_POST
 def agregar_seguimiento(request, id_adopcion):
@@ -335,11 +410,13 @@ def mis_adopciones(request):
         elif estado == "Rechazada":
             devoluciones_por_estado["devoluciones_rechazadas"].add(id_adopcion)
 
+    adopciones_finalizadas = _ids_adopciones_finalizadas(adopciones)
     return render(
         request,
         "mis-adopciones.html",
         {
             "adopciones": adopciones,
+            "adopciones_finalizadas": adopciones_finalizadas,
             **devoluciones_por_estado,
         }
     )
@@ -367,10 +444,12 @@ def solicitar_devolucion(request, id_adopcion):
     try:
         with transaction.atomic():
             adopcion = get_object_or_404(
-                Adopcion.objects.select_for_update(),
+                Adopcion.objects.select_for_update().filter(
+                    Q(fecha_termino__isnull=True)
+                    | Q(fecha_termino__gt=timezone.localdate())
+                ),
                 id_adopcion=id_adopcion,
                 id_usuario__supabase_uid=supabase_uid,
-                fecha_termino__isnull=True,
             )
             ya_solicitada = DevolucionAdopcion.objects.filter(
                 id_adopcion=adopcion

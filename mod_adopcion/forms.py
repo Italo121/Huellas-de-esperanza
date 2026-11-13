@@ -3,6 +3,32 @@ from django import forms
 from .models import SolicitudAdopcion
 
 
+class FechaTerminoAdopcionForm(forms.Form):
+    fecha_termino = forms.DateField(
+        required=False,
+        label="Fecha de término",
+        widget=forms.DateInput(
+            attrs={"class": "form-control", "type": "date"},
+        ),
+    )
+
+    def __init__(self, *args, fecha_inicio=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fecha_inicio = fecha_inicio
+
+    def clean_fecha_termino(self):
+        fecha_termino = self.cleaned_data["fecha_termino"]
+        if (
+            fecha_termino is not None
+            and self.fecha_inicio is not None
+            and fecha_termino < self.fecha_inicio
+        ):
+            raise forms.ValidationError(
+                "La fecha de término no puede ser anterior a la fecha de inicio."
+            )
+        return fecha_termino
+
+
 class RespuestaDevolucionAdopcionForm(forms.Form):
     action = forms.ChoiceField(
         choices=(

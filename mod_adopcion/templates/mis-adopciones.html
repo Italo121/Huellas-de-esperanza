@@ -85,7 +85,7 @@
                             <span class="badge text-bg-info mb-2">
                                 Devolución aprobada
                             </span>
-                            {% elif adopcion.fecha_termino %}
+                            {% elif adopcion.id_adopcion in adopciones_finalizadas %}
                             <span class="badge text-bg-secondary mb-2">
                                 Adopción finalizada
                             </span>
@@ -124,7 +124,7 @@
 
                             </div>
 
-                            {% if not adopcion.fecha_termino and adopcion.id_adopcion not in devoluciones_solicitadas %}
+                            {% if adopcion.id_adopcion not in adopciones_finalizadas and adopcion.id_adopcion not in devoluciones_solicitadas %}
                                 <button
                                     type="button"
                                     class="btn btn-outline-danger w-100"

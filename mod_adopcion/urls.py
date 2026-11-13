@@ -17,6 +17,11 @@ urlpatterns = [
         views.detalle_adopcion,
         name="detalle_adopcion"
     ),
+    path(
+        "seguimiento/<int:id_adopcion>/fecha-termino/",
+        views.editar_fecha_termino,
+        name="editar_fecha_termino",
+    ),
      path(
         "mis-adopciones/",
         views.mis_adopciones,
