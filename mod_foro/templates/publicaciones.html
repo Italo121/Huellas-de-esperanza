@@ -95,7 +95,9 @@
 
     <section aria-labelledby="publicaciones-titulo">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2 class="h4 fw-bold mb-0" id="publicaciones-titulo">Publicaciones</h2>
+            <h2 class="h4 fw-bold mb-0" id="publicaciones-titulo">
+                Publicaciones
+            </h2>
             <span class="badge rounded-pill bg-success">{{ publicaciones|length }}</span>
         </div>
 
@@ -140,7 +142,7 @@
                             <p class="small text-secondary mb-3">Aún no hay comentarios. ¡Sé el primero en participar!</p>
                         {% endfor %}
 
-                        {% if usuario_conectado %}
+                        {% if usuario_conectado and publicacion.id_estado.nombre == "Publicada" %}
                             <form method="post" action="{% url 'mod_foro:crear_comentario' publicacion.pk %}" class="mt-3">
                                 {% csrf_token %}
                                 <label class="visually-hidden" for="comentario-{{ publicacion.pk }}">Escribe un comentario</label>

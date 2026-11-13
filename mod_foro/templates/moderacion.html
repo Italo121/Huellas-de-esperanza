@@ -1,0 +1,104 @@
+{% extends "index.html" %}
+
+{% block title %}Moderación del foro | Huellas de esperanza{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3 p-lg-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <header class="mb-4">
+        <h1 class="h2 fw-bold text-success">
+            <i class="bi bi-shield-check me-2" aria-hidden="true"></i>
+            Moderación del foro
+        </h1>
+        <p class="text-secondary mb-0">
+            Revisa todas las publicaciones y comentarios, incluidos los que ya están ocultos.
+        </p>
+    </header>
+
+    <section aria-labelledby="publicaciones-moderacion">
+        <h2 class="h4 fw-bold mb-3" id="publicaciones-moderacion">
+            Publicaciones <span class="badge rounded-pill bg-success">{{ publicaciones|length }}</span>
+        </h2>
+
+        {% for publicacion in publicaciones %}
+            <article class="card border-0 shadow-sm rounded-4 mb-4" id="publicacion-{{ publicacion.pk }}">
+                <div class="card-body p-3 p-md-4">
+                    <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">{{ publicacion.titulo }}</h3>
+                            <p class="small text-secondary mb-1">
+                                {{ publicacion.categoria|capfirst }}
+                                <span aria-hidden="true">·</span>
+                                <time datetime="{{ publicacion.fecha_publicacion|date:'c' }}">{{ publicacion.fecha_publicacion|date:"d/m/Y" }}</time>
+                            </p>
+                            <span class="badge {% if publicacion.id_estado.nombre == 'Publicada' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                                {{ publicacion.id_estado.nombre }}
+                            </span>
+                        </div>
+                        {% if publicacion.id_estado.nombre == "Publicada" %}
+                            <form method="post" action="{% url 'mod_foro:ocultar_publicacion' publicacion.pk %}">
+                                {% csrf_token %}
+                                <button class="btn btn-sm btn-outline-secondary" type="submit">Ocultar publicación</button>
+                            </form>
+                        {% endif %}
+                    </div>
+
+                    <p class="mb-3" style="white-space: pre-line;">{{ publicacion.contenido }}</p>
+                    <p class="small text-secondary mb-3">
+                        <i class="bi bi-geo-alt me-1" aria-hidden="true"></i>{{ publicacion.ubicacion }}
+                    </p>
+
+                    <div class="border-top pt-3">
+                        <h4 class="h6 fw-bold mb-3">
+                            <i class="bi bi-chat-dots text-success me-1" aria-hidden="true"></i>
+                            Comentarios <span class="text-secondary fw-normal">({{ publicacion.comentarios.all|length }})</span>
+                        </h4>
+
+                        {% for comentario in publicacion.comentarios.all %}
+                            <div class="bg-light rounded-3 p-3 mb-2">
+                                <div class="d-flex justify-content-between flex-wrap gap-2 mb-1">
+                                    <strong class="small">
+                                        {{ comentario.id_usuario.p_nombre }} {{ comentario.id_usuario.ap_paterno }}
+                                    </strong>
+                                    <span class="badge {% if comentario.id_estado.nombre == 'Visible' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                                        {{ comentario.id_estado.nombre }}
+                                    </span>
+                                </div>
+                                <p class="small text-secondary mb-1">
+                                    <time datetime="{{ comentario.fecha|date:'c' }}">{{ comentario.fecha|date:"d/m/Y" }}</time>
+                                </p>
+                                <p class="mb-0 small" style="white-space: pre-line;">{{ comentario.contenido }}</p>
+                                {% if comentario.id_estado.nombre == "Visible" %}
+                                    <form method="post" action="{% url 'mod_foro:ocultar_comentario' comentario.pk %}" class="mt-2">
+                                        {% csrf_token %}
+                                        <button class="btn btn-sm btn-outline-secondary" type="submit">Ocultar comentario</button>
+                                    </form>
+                                {% elif comentario.id_estado.nombre == "Oculto (Moderado)" %}
+                                    <form method="post" action="{% url 'mod_foro:mostrar_comentario' comentario.pk %}" class="mt-2">
+                                        {% csrf_token %}
+                                        <button class="btn btn-sm btn-outline-success" type="submit">Volver a mostrar comentario</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        {% empty %}
+                            <p class="small text-secondary mb-0">Esta publicación aún no tiene comentarios.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </article>
+        {% empty %}
+            <div class="text-center bg-white border rounded-4 p-5">
+                <h3 class="h5">Todavía no hay publicaciones</h3>
+            </div>
+        {% endfor %}
+    </section>
+</div>
+{% endblock %}
