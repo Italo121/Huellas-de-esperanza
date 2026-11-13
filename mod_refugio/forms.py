@@ -1,3 +1,6 @@
+import re
+import unicodedata
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
@@ -17,6 +20,56 @@ from .models import (
 
 MAX_ANIMAL_IMAGE_SIZE = 5 * 1024 * 1024
 ALLOWED_ANIMAL_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
+PERSON_NAME_PATTERN = re.compile(r"^[^\W\d_]+(?:[ '’][^\W\d_]+)*$", re.UNICODE)
+CHILEAN_RUT_PATTERN = re.compile(
+    r"(?P<base>\d{7,8}|\d{1,2}(?:\.\d{3}){2})-?(?P<verifier>[\dKk])"
+)
+
+
+def normalize_chilean_rut(value):
+    match = CHILEAN_RUT_PATTERN.fullmatch(value.strip())
+    if not match:
+        raise ValidationError(
+            "Ingresa un RUT válido, por ejemplo 12.345.678-5."
+        )
+
+    base = match.group("base").replace(".", "")
+    total = sum(
+        int(digit) * (index % 6 + 2)
+        for index, digit in enumerate(reversed(base))
+    )
+    expected_verifier = 11 - total % 11
+    expected_verifier = (
+        "0"
+        if expected_verifier == 11
+        else "K"
+        if expected_verifier == 10
+        else str(expected_verifier)
+    )
+
+    if match.group("verifier").upper() != expected_verifier:
+        raise ValidationError("El dígito verificador del RUT no es válido.")
+
+    return f"{base}-{expected_verifier}"
+
+
+def clean_person_names(cleaned_data, form):
+    for field_name in ("p_nombre", "s_nombre", "ap_paterno", "ap_materno"):
+        value = cleaned_data.get(field_name)
+        if not value:
+            continue
+
+        value = " ".join(unicodedata.normalize("NFC", value).split())
+        if not PERSON_NAME_PATTERN.fullmatch(value):
+            form.add_error(
+                field_name,
+                (
+                    "Usa solo letras, espacios y apóstrofes; no se permiten "
+                    "números ni símbolos."
+                ),
+            )
+        else:
+            cleaned_data[field_name] = value
 
 
 def validate_animal_image_size(image):
@@ -32,22 +85,26 @@ def validate_animal_image_format(image):
 
 class RegistroUsuarioForm(forms.Form):
     p_nombre = forms.CharField(
+        min_length=2,
         max_length=50,
         label="Primer nombre",
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
     s_nombre = forms.CharField(
+        min_length=2,
         max_length=50,
         label="Segundo nombre",
         required=False,
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
     ap_paterno = forms.CharField(
+        min_length=2,
         max_length=50,
         label="Apellido paterno",
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
     ap_materno = forms.CharField(
+        min_length=2,
         max_length=50,
         label="Apellido materno",
         required=False,
@@ -108,6 +165,7 @@ class RegistroUsuarioForm(forms.Form):
 
     def clean(self):
         cleaned_data = super().clean()
+        clean_person_names(cleaned_data, self)
         password = cleaned_data.get("password")
         password_confirmation = cleaned_data.get("password_confirmation")
         if password and password_confirmation and password != password_confirmation:
@@ -177,7 +235,8 @@ class GestionSolicitudVoluntariadoForm(forms.ModelForm):
 
 class AltaPersonalDesdeSolicitudForm(forms.Form):
     rut_personal = forms.CharField(
-        max_length=10,
+        min_length=8,
+        max_length=12,
         label="RUT del personal",
         widget=forms.TextInput(
             attrs={
@@ -206,6 +265,9 @@ class AltaPersonalDesdeSolicitudForm(forms.Form):
             attrs={"class": "form-control", "rows": 2}
         ),
     )
+
+    def clean_rut_personal(self):
+        return normalize_chilean_rut(self.cleaned_data["rut_personal"])
 
 
 class FiltroFechaSolicitudForm(forms.Form):

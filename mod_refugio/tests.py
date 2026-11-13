@@ -18,7 +18,11 @@ from httpx import ReadTimeout
 
 from .context_processors import personal_context
 from . import views
-from .forms import FiltroFechaSolicitudForm
+from .forms import (
+    AltaPersonalDesdeSolicitudForm,
+    FiltroFechaSolicitudForm,
+    RegistroUsuarioForm,
+)
 from .models import (
     Animal,
     EvaluacionAnimal,
@@ -1746,6 +1750,48 @@ class RegistroUsuarioTests(SimpleTestCase):
             },
         )
 
+    def test_registration_accepts_latin_names_and_apostrophes(self):
+        data = {
+            "p_nombre": "José",
+            "s_nombre": "O'Connor",
+            "ap_paterno": "Muñoz",
+            "ap_materno": "D’Amico",
+            "correo": "jose@example.com",
+            "genero": "masculino",
+            "fecha_nacimiento": "1990-01-02",
+            "telefono": "",
+            "password": "password123",
+            "password_confirmation": "password123",
+        }
+
+        form = RegistroUsuarioForm(data=data)
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_registration_rejects_numbers_symbols_and_short_names(self):
+        for field_name, invalid_name in (
+            ("p_nombre", "A1"),
+            ("ap_paterno", "Pérez@"),
+            ("ap_paterno", "A"),
+        ):
+            with self.subTest(field=field_name, value=invalid_name):
+                data = self.request.POST.copy()
+                data[field_name] = invalid_name
+
+                form = RegistroUsuarioForm(data=data)
+
+                self.assertFalse(form.is_valid())
+                self.assertIn(field_name, form.errors)
+
+    def test_registration_rejects_names_longer_than_50_characters(self):
+        data = self.request.POST.copy()
+        data["p_nombre"] = "A" * 51
+
+        form = RegistroUsuarioForm(data=data)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("p_nombre", form.errors)
+
     @patch("mod_refugio.views.supabase")
     @patch("mod_refugio.views.Usuario.objects.filter")
     def test_existing_local_email_does_not_create_supabase_account(
@@ -1880,6 +1926,40 @@ class RegistroUsuarioTests(SimpleTestCase):
             "no pudimos guardar correctamente tus datos",
             response.content.decode().lower(),
         )
+
+
+class AltaPersonalDesdeSolicitudFormTests(SimpleTestCase):
+    def get_form(self, rut):
+        return AltaPersonalDesdeSolicitudForm(
+            data={
+                "rut_personal": rut,
+                "rol": "cuidador",
+                "telefono_emergencia": "987654321",
+                "direccion": "Calle de prueba 123",
+            }
+        )
+
+    def test_rut_accepts_formatted_and_unformatted_values(self):
+        for rut in ("12.345.678-5", "123456785"):
+            with self.subTest(rut=rut):
+                form = self.get_form(rut)
+
+                self.assertTrue(form.is_valid(), form.errors)
+                self.assertEqual(form.cleaned_data["rut_personal"], "12345678-5")
+
+    def test_rut_accepts_k_verifier_case_insensitively(self):
+        form = self.get_form("1.000.005-k")
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["rut_personal"], "1000005-K")
+
+    def test_rut_rejects_invalid_verifier_and_format(self):
+        for rut in ("12.345.678-9", "1234567X5", "1.234.567-8"):
+            with self.subTest(rut=rut):
+                form = self.get_form(rut)
+
+                self.assertFalse(form.is_valid())
+                self.assertIn("rut_personal", form.errors)
 
 
 class LoginUsuarioTests(SimpleTestCase):
