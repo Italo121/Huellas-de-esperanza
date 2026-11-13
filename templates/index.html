@@ -344,6 +344,14 @@
                         Comunidad
                     </a>
                 </li>
+                {% if es_personal %}
+                    <li class="nav-item">
+                        <a href="{% url 'mod_foro:moderacion' %}" class="nav-link text-white">
+                            <i class="bi bi-shield-check me-2"></i>
+                            Moderar foro
+                        </a>
+                    </li>
+                {% endif %}
             </ul>
 
         </aside>

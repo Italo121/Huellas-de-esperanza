@@ -4,27 +4,71 @@ from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError
+from django.db.models import Prefetch
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from mod_refugio.models import Estado, Usuario
+from mod_refugio.models import Estado, Personal, Usuario
 
 from .forms import ComentarioForm, PublicacionForm
 from .models import Comentario, Publicacion
 
 logger = logging.getLogger(__name__)
 
-
 def publicaciones(request):
     return _render_publicaciones(request)
 
 
+def moderacion(request):
+    error_response = _personal_de_sesion(request)
+    if error_response is not None:
+        return error_response
+
+    try:
+        publicaciones = (
+            Publicacion.objects.filter(id_estado__tipo_estado="Publicacion")
+            .select_related("id_estado")
+            .prefetch_related(
+                Prefetch(
+                    "comentarios",
+                    queryset=Comentario.objects.filter(
+                        id_estado__tipo_estado="Comentario",
+                    ).select_related("id_usuario", "id_estado"),
+                )
+            )
+        )
+        return render(
+            request,
+            "moderacion.html",
+            {"publicaciones": publicaciones},
+        )
+    except DatabaseError:
+        logger.exception("No se pudieron cargar publicaciones para moderar")
+        return HttpResponse(
+            "No fue posible cargar el contenido del foro.",
+            status=503,
+        )
+
+
 def _render_publicaciones(request, publicacion_form=None):
     publicaciones = (
-        Publicacion.objects.select_related("id_estado")
-        .prefetch_related("comentarios__id_usuario", "comentarios__id_estado")
+        Publicacion.objects.filter(
+            id_estado__tipo_estado="Publicacion",
+            id_estado__nombre="Publicada",
+        )
+        .select_related("id_estado")
+        .prefetch_related(
+            Prefetch(
+                "comentarios",
+                queryset=Comentario.objects.filter(
+                    id_estado__tipo_estado="Comentario",
+                    id_estado__nombre="Visible",
+                ).select_related("id_usuario", "id_estado"),
+            )
+        )
         .all()
     )
     return render(
@@ -78,7 +122,12 @@ def crear_comentario(request, publicacion_id):
     if usuario is None:
         return _solicitar_inicio_sesion(request)
 
-    publicacion = get_object_or_404(Publicacion, pk=publicacion_id)
+    publicacion = get_object_or_404(
+        Publicacion,
+        pk=publicacion_id,
+        id_estado__tipo_estado="Publicacion",
+        id_estado__nombre="Publicada",
+    )
     form = ComentarioForm(request.POST)
     if form.is_valid():
         comentario = form.save(commit=False)
@@ -104,6 +153,127 @@ def crear_comentario(request, publicacion_id):
     else:
         messages.error(request, "El comentario no puede estar vacío ni superar 1000 caracteres.")
     return redirect(f"{reverse('mod_foro:publicaciones')}#publicacion-{publicacion.pk}")
+
+
+@require_POST
+def ocultar_publicacion(request, publicacion_id):
+    return _cambiar_estado_foro(
+        request,
+        Publicacion,
+        publicacion_id,
+        "Publicacion",
+        "Publicada",
+        "Archivada",
+        "La publicación se ocultó correctamente.",
+        f"#publicacion-{publicacion_id}",
+    )
+
+
+@require_POST
+def ocultar_comentario(request, comentario_id):
+    return _cambiar_estado_foro(
+        request,
+        Comentario,
+        comentario_id,
+        "Comentario",
+        "Visible",
+        "Oculto (Moderado)",
+        "El comentario se ocultó correctamente.",
+    )
+
+
+@require_POST
+def mostrar_comentario(request, comentario_id):
+    return _cambiar_estado_foro(
+        request,
+        Comentario,
+        comentario_id,
+        "Comentario",
+        "Oculto (Moderado)",
+        "Visible",
+        "El comentario volvió a estar visible.",
+    )
+
+
+def _cambiar_estado_foro(
+    request,
+    modelo,
+    objeto_id,
+    tipo_estado,
+    nombre_estado_actual,
+    nombre_estado_nuevo,
+    mensaje,
+    ancla="",
+):
+    error_response = _personal_de_sesion(request)
+    if error_response is not None:
+        return error_response
+
+    ruta_retorno = reverse("mod_foro:moderacion")
+
+    try:
+        estado = _estado_foro(tipo_estado, nombre_estado_nuevo)
+    except DatabaseError:
+        logger.exception(
+            "No se pudo consultar el estado %s/%s del foro",
+            tipo_estado,
+            nombre_estado_nuevo,
+        )
+        messages.error(request, "No se pudo actualizar el estado en este momento.")
+        return redirect(f"{ruta_retorno}{ancla}")
+    if estado is None:
+        logger.error(
+            "Falta el estado %s/%s en la base de datos",
+            tipo_estado,
+            nombre_estado_nuevo,
+        )
+        messages.error(request, "No se pudo actualizar el estado en este momento.")
+        return redirect(f"{ruta_retorno}{ancla}")
+
+    try:
+        filtros = {
+            "pk": objeto_id,
+            "id_estado__tipo_estado": tipo_estado,
+            "id_estado__nombre": nombre_estado_actual,
+        }
+        objeto = get_object_or_404(modelo, **filtros)
+        objeto.id_estado = estado
+        objeto.save(update_fields=("id_estado",))
+        if tipo_estado == "Comentario":
+            ancla = f"#publicacion-{objeto.publicacion_id}"
+    except DatabaseError:
+        logger.exception(
+            "No se pudo cambiar el estado %s/%s del foro",
+            tipo_estado,
+            objeto_id,
+        )
+        messages.error(request, "No se pudo actualizar. Inténtalo nuevamente.")
+    else:
+        messages.success(request, mensaje)
+    return redirect(f"{ruta_retorno}{ancla}")
+
+
+def _personal_de_sesion(request):
+    session_user = request.session.get("refugio_usuario") or {}
+    supabase_uid = session_user.get("id")
+    if not supabase_uid:
+        return _solicitar_inicio_sesion(request)
+
+    try:
+        es_personal = Personal.objects.filter(
+            id_usuario__supabase_uid=supabase_uid,
+        ).exists()
+    except DatabaseError:
+        logger.exception("No se pudo verificar el acceso de personal al foro")
+        return HttpResponse(
+            "No fue posible verificar los permisos del personal.",
+            status=503,
+        )
+    if not es_personal:
+        return HttpResponseForbidden(
+            "Esta sección está disponible solo para el personal del refugio."
+        )
+    return None
 
 
 def _usuario_de_sesion(request):
