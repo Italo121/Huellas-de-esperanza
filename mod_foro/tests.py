@@ -1,12 +1,17 @@
-from unittest.mock import Mock, patch
+from datetime import date
+from contextlib import nullcontext
+from types import SimpleNamespace
+from unittest.mock import Mock, call, patch
 
 from django import forms
+from django.template import Context
+from django.template.loader import get_template
 from django.test import RequestFactory, SimpleTestCase
 from django.urls import reverse
 
 from . import views
 from .forms import ComentarioForm, PublicacionForm
-from .models import Comentario, Publicacion
+from .models import Comentario, Publicacion, PublicacionPersonal
 
 
 class ForoFormTests(SimpleTestCase):
@@ -57,6 +62,7 @@ class ForoFormTests(SimpleTestCase):
 
     def test_publicacion_muestra_errores_y_conserva_datos_en_formulario(self):
         publicaciones = Mock()
+        publicaciones.annotate.return_value = publicaciones
         publicaciones.select_related.return_value.prefetch_related.return_value.all.return_value = (
             []
         )
@@ -97,6 +103,7 @@ class ForoFormTests(SimpleTestCase):
 
     def test_vista_publica_filtra_publicaciones_y_comentarios_visibles(self):
         publicaciones = Mock()
+        publicaciones.annotate.return_value = publicaciones
         publicaciones.select_related.return_value.prefetch_related.return_value.all.return_value = (
             []
         )
@@ -120,6 +127,37 @@ class ForoFormTests(SimpleTestCase):
             sorted(condition.rhs for condition in prefetch.queryset.query.where.children),
             ["Comentario", "Visible"],
         )
+        publicaciones.annotate.assert_called_once()
+        self.assertIsInstance(
+            publicaciones.annotate.call_args.kwargs["es_publicacion_personal"],
+            views.Exists,
+        )
+
+    def test_publicacion_de_personal_se_muestra_destacada(self):
+        publicacion = SimpleNamespace(
+            pk=12,
+            titulo="Aviso del refugio",
+            categoria="rescate",
+            fecha_publicacion=date(2026, 11, 13),
+            es_publicacion_personal=True,
+            contenido="Información para la comunidad.",
+            ubicacion="Santiago",
+            comentarios=SimpleNamespace(all=lambda: []),
+            id_estado=SimpleNamespace(nombre="Publicada"),
+        )
+
+        html = get_template("publicaciones.html").template.render(
+            Context(
+                {
+                    "publicaciones": [publicacion],
+                    "usuario_conectado": None,
+                    "publicacion_form": PublicacionForm(),
+                }
+            )
+        )
+
+        self.assertIn("Publicación del personal", html)
+        self.assertIn("border-success", html)
 
     def test_solo_personal_puede_abrir_moderacion(self):
         request = RequestFactory().get("/foro/moderacion/")
@@ -146,6 +184,37 @@ class ForoFormTests(SimpleTestCase):
         self.assertEqual(
             [condition.rhs for condition in prefetch.queryset.query.where.children],
             ["Comentario"],
+        )
+
+    def test_moderacion_filtra_publicaciones_por_tipo(self):
+        request = RequestFactory().get(
+            "/foro/moderacion/",
+            {"tipo": "rescate"},
+        )
+        request.session = {"refugio_usuario": {"id": "staff-uuid"}}
+        publicaciones = Mock()
+        publicaciones.filter.return_value = publicaciones
+
+        with (
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_foro.views.Publicacion.objects.filter",
+                return_value=publicaciones,
+            ) as filtrar_publicaciones,
+            patch("mod_foro.views.render") as render,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            views.moderacion(request)
+
+        filtrar_publicaciones.assert_called_once_with(
+            id_estado__tipo_estado="Publicacion",
+        )
+        publicaciones.filter.assert_called_once_with(categoria="rescate")
+        context = render.call_args.args[2]
+        self.assertEqual(context["tipo_seleccionado"], "rescate")
+        self.assertEqual(
+            context["tipos_publicacion"],
+            (("adopcion", "Adopción"), ("rescate", "Rescate")),
         )
 
     def test_usuario_sin_personal_no_puede_abrir_moderacion(self):
@@ -180,12 +249,52 @@ class ForoFormTests(SimpleTestCase):
             patch("mod_foro.views._usuario_de_sesion", return_value=usuario),
             patch("mod_foro.views.PublicacionForm", return_value=form),
             patch("mod_foro.views._estado_foro", return_value=estado_publicada),
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_foro.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
             patch("mod_foro.views.messages.success"),
         ):
+            personal_filter.return_value.exists.return_value = False
             response = views.crear_publicacion(request)
 
         self.assertEqual(response.status_code, 302)
         publicacion.save.assert_called_once_with()
+
+    def test_publicacion_de_personal_se_marca_para_destacarla(self):
+        request = RequestFactory().post("/foro/publicar/", {})
+        usuario = object()
+        publicacion = Mock(pk=12)
+        estado_publicada = object()
+        form = Mock()
+        form.is_valid.return_value = True
+        form.save.return_value = publicacion
+
+        with (
+            patch("mod_foro.views._usuario_de_sesion", return_value=usuario),
+            patch("mod_foro.views.PublicacionForm", return_value=form),
+            patch("mod_foro.views._estado_foro", return_value=estado_publicada),
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_foro.views.PublicacionPersonal.objects.create"
+            ) as crear_marca,
+            patch(
+                "mod_foro.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_foro.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.crear_publicacion(request)
+
+        self.assertEqual(response.status_code, 302)
+        publicacion.save.assert_called_once_with()
+        personal_filter.assert_called_once_with(id_usuario=usuario)
+        crear_marca.assert_called_once_with(
+            publicacion=publicacion,
+            usuario=usuario,
+        )
 
     def test_rutas_de_moderacion(self):
         self.assertEqual(
@@ -241,6 +350,92 @@ class ForoFormTests(SimpleTestCase):
     def test_ocultar_publicacion_solo_acepta_post(self):
         response = self.client.get(
             reverse("mod_foro:ocultar_publicacion", args=(12,))
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_ruta_eliminar_publicacion(self):
+        self.assertEqual(
+            reverse("mod_foro:eliminar_publicacion", args=(12,)),
+            "/foro/publicaciones/12/eliminar/",
+        )
+
+    def test_personal_elimina_publicacion_y_sus_comentarios(self):
+        request = RequestFactory().post("/foro/publicaciones/12/eliminar/")
+        request.session = {"refugio_usuario": {"id": "staff-uuid"}}
+        publicacion = Mock()
+        comentarios = Mock()
+        eventos = Mock()
+        eventos.attach_mock(comentarios.delete, "eliminar_comentarios")
+        eventos.attach_mock(publicacion.delete, "eliminar_publicacion")
+
+        with (
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_foro.views.Publicacion.objects.select_for_update"
+            ) as bloquear_publicaciones,
+            patch(
+                "mod_foro.views.PublicacionPersonal.objects.filter"
+            ) as marcas,
+            patch(
+                "mod_foro.views.get_object_or_404",
+                return_value=publicacion,
+            ) as buscar,
+            patch(
+                "mod_foro.views.Comentario.objects.filter",
+                return_value=comentarios,
+            ) as buscar_comentarios,
+            patch(
+                "mod_foro.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_foro.views.messages.success") as success,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            eventos.attach_mock(
+                marcas.return_value.delete,
+                "eliminar_marca_personal",
+            )
+            response = views.eliminar_publicacion(request, 12)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("mod_foro:moderacion"))
+        bloquear_publicaciones.assert_called_once_with()
+        buscar.assert_called_once_with(
+            bloquear_publicaciones.return_value,
+            pk=12,
+        )
+        marcas.assert_called_once_with(publicacion=publicacion)
+        buscar_comentarios.assert_called_once_with(publicacion=publicacion)
+        self.assertEqual(
+            eventos.mock_calls,
+            [
+                call.eliminar_marca_personal(),
+                call.eliminar_comentarios(),
+                call.eliminar_publicacion(),
+            ],
+        )
+        success.assert_called_once()
+
+    def test_usuario_que_no_es_personal_no_puede_eliminar_publicacion(self):
+        request = RequestFactory().post("/foro/publicaciones/12/eliminar/")
+        request.session = {"refugio_usuario": {"id": "usuario-uuid"}}
+
+        with (
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch("mod_foro.views.get_object_or_404") as buscar,
+            patch("mod_foro.views.Comentario.objects.filter") as comentarios,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.eliminar_publicacion(request, 12)
+
+        self.assertEqual(response.status_code, 403)
+        buscar.assert_not_called()
+        comentarios.assert_not_called()
+
+    def test_eliminar_publicacion_solo_acepta_post(self):
+        response = self.client.get(
+            reverse("mod_foro:eliminar_publicacion", args=(12,))
         )
 
         self.assertEqual(response.status_code, 405)

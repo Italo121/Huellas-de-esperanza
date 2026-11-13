@@ -19,6 +19,11 @@ urlpatterns = [
         name="ocultar_publicacion",
     ),
     path(
+        "publicaciones/<int:publicacion_id>/eliminar/",
+        views.eliminar_publicacion,
+        name="eliminar_publicacion",
+    ),
+    path(
         "comentarios/<int:comentario_id>/ocultar/",
         views.ocultar_comentario,
         name="ocultar_comentario",

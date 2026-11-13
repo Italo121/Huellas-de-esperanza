@@ -25,6 +25,25 @@ class Publicacion(models.Model):
         return self.titulo
 
 
+class PublicacionPersonal(models.Model):
+    publicacion = models.OneToOneField(
+        Publicacion,
+        on_delete=models.CASCADE,
+        db_column="id_publicacion",
+        primary_key=True,
+        related_name="marca_personal",
+    )
+    usuario = models.ForeignKey(
+        "mod_refugio.Usuario",
+        on_delete=models.DO_NOTHING,
+        db_column="id_usuario",
+        related_name="publicaciones_destacadas_foro",
+    )
+
+    class Meta:
+        db_table = "publicacion_personal_foro"
+
+
 class Comentario(models.Model):
     id_comentario = models.BigAutoField(primary_key=True)
     contenido = models.TextField()

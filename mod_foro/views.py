@@ -3,8 +3,8 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError
-from django.db.models import Prefetch
+from django.db import DatabaseError, transaction
+from django.db.models import Exists, OuterRef, Prefetch
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -14,9 +14,17 @@ from django.views.decorators.http import require_POST
 from mod_refugio.models import Estado, Personal, Usuario
 
 from .forms import ComentarioForm, PublicacionForm
-from .models import Comentario, Publicacion
+from .models import Comentario, Publicacion, PublicacionPersonal
 
 logger = logging.getLogger(__name__)
+
+
+TIPOS_PUBLICACION = tuple(
+    (valor, etiqueta)
+    for valor, etiqueta in PublicacionForm.base_fields["categoria"].choices
+    if valor
+)
+
 
 def publicaciones(request):
     return _render_publicaciones(request)
@@ -28,8 +36,19 @@ def moderacion(request):
         return error_response
 
     try:
+        tipo_seleccionado = request.GET.get("tipo", "").strip()
+        tipos_validos = {valor for valor, _etiqueta in TIPOS_PUBLICACION}
+        if tipo_seleccionado not in tipos_validos:
+            tipo_seleccionado = ""
+
+        publicaciones = Publicacion.objects.filter(
+            id_estado__tipo_estado="Publicacion"
+        )
+        if tipo_seleccionado:
+            publicaciones = publicaciones.filter(categoria=tipo_seleccionado)
+
         publicaciones = (
-            Publicacion.objects.filter(id_estado__tipo_estado="Publicacion")
+            publicaciones
             .select_related("id_estado")
             .prefetch_related(
                 Prefetch(
@@ -43,7 +62,11 @@ def moderacion(request):
         return render(
             request,
             "moderacion.html",
-            {"publicaciones": publicaciones},
+            {
+                "publicaciones": publicaciones,
+                "tipos_publicacion": TIPOS_PUBLICACION,
+                "tipo_seleccionado": tipo_seleccionado,
+            },
         )
     except DatabaseError:
         logger.exception("No se pudieron cargar publicaciones para moderar")
@@ -58,6 +81,13 @@ def _render_publicaciones(request, publicacion_form=None):
         Publicacion.objects.filter(
             id_estado__tipo_estado="Publicacion",
             id_estado__nombre="Publicada",
+        )
+        .annotate(
+            es_publicacion_personal=Exists(
+                PublicacionPersonal.objects.filter(
+                    publicacion_id=OuterRef("pk"),
+                )
+            )
         )
         .select_related("id_estado")
         .prefetch_related(
@@ -101,9 +131,15 @@ def crear_publicacion(request):
         publicacion.fecha_publicacion = timezone.localdate()
         publicacion.id_estado = estado_publicada
         try:
-            publicacion.save()
+            with transaction.atomic():
+                publicacion.save()
+                if Personal.objects.filter(id_usuario=usuario).exists():
+                    PublicacionPersonal.objects.create(
+                        publicacion=publicacion,
+                        usuario=usuario,
+                    )
         except DatabaseError:
-            logger.exception("No se pudo guardar una publicación del foro")
+            logger.exception("No se pudo guardar la publicación del foro")
             messages.error(request, "No se pudo publicar. Inténtalo nuevamente.")
         else:
             messages.success(request, "Tu publicación se compartió correctamente.")
@@ -167,6 +203,38 @@ def ocultar_publicacion(request, publicacion_id):
         "La publicación se ocultó correctamente.",
         f"#publicacion-{publicacion_id}",
     )
+
+
+@require_POST
+def eliminar_publicacion(request, publicacion_id):
+    error_response = _personal_de_sesion(request)
+    if error_response is not None:
+        return error_response
+
+    try:
+        with transaction.atomic():
+            publicacion = get_object_or_404(
+                Publicacion.objects.select_for_update(),
+                pk=publicacion_id,
+            )
+            PublicacionPersonal.objects.filter(publicacion=publicacion).delete()
+            Comentario.objects.filter(publicacion=publicacion).delete()
+            publicacion.delete()
+    except DatabaseError:
+        logger.exception(
+            "No se pudo eliminar la publicación %s y sus comentarios",
+            publicacion_id,
+        )
+        messages.error(
+            request,
+            "No se pudo eliminar la publicación. Inténtalo nuevamente.",
+        )
+    else:
+        messages.success(
+            request,
+            "La publicación y sus comentarios se eliminaron permanentemente.",
+        )
+    return redirect("mod_foro:moderacion")
 
 
 @require_POST

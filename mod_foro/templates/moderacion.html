@@ -23,6 +23,26 @@
         </p>
     </header>
 
+    <form method="get" class="row g-2 align-items-end mb-4" aria-label="Filtrar publicaciones por tipo">
+        <div class="col-sm-6 col-md-4">
+            <label for="tipo-publicacion" class="form-label">Tipo de publicación</label>
+            <select id="tipo-publicacion" name="tipo" class="form-select">
+                <option value="">Todos los tipos</option>
+                {% for valor, etiqueta in tipos_publicacion %}
+                    <option value="{{ valor }}" {% if valor == tipo_seleccionado %}selected{% endif %}>
+                        {{ etiqueta }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-outline-success">Filtrar</button>
+            {% if tipo_seleccionado %}
+                <a href="{% url 'mod_foro:moderacion' %}" class="btn btn-outline-secondary">Limpiar</a>
+            {% endif %}
+        </div>
+    </form>
+
     <section aria-labelledby="publicaciones-moderacion">
         <h2 class="h4 fw-bold mb-3" id="publicaciones-moderacion">
             Publicaciones <span class="badge rounded-pill bg-success">{{ publicaciones|length }}</span>
@@ -49,6 +69,16 @@
                                 <button class="btn btn-sm btn-outline-secondary" type="submit">Ocultar publicación</button>
                             </form>
                         {% endif %}
+                        <form
+                            method="post"
+                            action="{% url 'mod_foro:eliminar_publicacion' publicacion.pk %}"
+                            onsubmit="return confirm('¿Eliminar permanentemente esta publicación y todos sus comentarios? Esta acción no se puede deshacer.');"
+                        >
+                            {% csrf_token %}
+                            <button class="btn btn-sm btn-outline-danger" type="submit">
+                                Eliminar publicación
+                            </button>
+                        </form>
                     </div>
 
                     <p class="mb-3" style="white-space: pre-line;">{{ publicacion.contenido }}</p>
