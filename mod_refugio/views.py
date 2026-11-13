@@ -681,7 +681,7 @@ def gestion_solicitudes(request):
                             datos_personal = personal_form.cleaned_data
                             try:
                                 with transaction.atomic():
-                                    Personal.objects.create(
+                                    personal_creado = Personal.objects.create(
                                         rut_personal=datos_personal["rut_personal"],
                                         rol=datos_personal["rol"],
                                         fecha_ingreso=timezone.localdate(),
@@ -693,6 +693,12 @@ def gestion_solicitudes(request):
                                         id_estado=estado_activo,
                                         id_solicitud_vol=solicitud,
                                     )
+                                    if datos_personal["rol"] == "veterinario":
+                                        Veterinario.objects.create(
+                                            rut_personal=personal_creado,
+                                            especialidad=datos_personal["especialidad"],
+                                            experiencia=datos_personal["experiencia"],
+                                        )
                             except DatabaseError:
                                 logger.exception(
                                     "Unable to create staff profile from approved application %s by admin %s",

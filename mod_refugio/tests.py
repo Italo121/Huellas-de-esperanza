@@ -1331,7 +1331,7 @@ class GestionSolicitudesTests(SimpleTestCase):
         )
         success_message.assert_called_once()
 
-    def test_admin_can_create_personal_profile_for_approved_application(self):
+    def test_admin_can_create_veterinarian_profile_for_approved_application(self):
         admin = SimpleNamespace(pk="11111111-1", rol="admin")
         usuario = SimpleNamespace(pk=7)
         solicitud = SimpleNamespace(
@@ -1343,7 +1343,9 @@ class GestionSolicitudesTests(SimpleTestCase):
         personal_form.is_valid.return_value = True
         personal_form.cleaned_data = {
             "rut_personal": "12345678-9",
-            "rol": "cuidador",
+            "rol": "veterinario",
+            "especialidad": "Animales menores",
+            "experiencia": 5,
             "telefono_emergencia": 987654321,
             "direccion": "Calle de prueba 123",
         }
@@ -1353,7 +1355,9 @@ class GestionSolicitudesTests(SimpleTestCase):
                 "action": "incorporar_personal",
                 "solicitud_id": "11",
                 "rut_personal": "12345678-9",
-                "rol": "cuidador",
+                "rol": "veterinario",
+                "especialidad": "Animales menores",
+                "experiencia": "5",
                 "telefono_emergencia": "987654321",
                 "direccion": "Calle de prueba 123",
             },
@@ -1383,6 +1387,9 @@ class GestionSolicitudesTests(SimpleTestCase):
                 "mod_refugio.views.Personal.objects.create"
             ) as personal_create,
             patch(
+                "mod_refugio.views.Veterinario.objects.create"
+            ) as veterinarian_create,
+            patch(
                 "mod_refugio.views.SolicitudVoluntariado.objects.select_related"
             ),
             patch("mod_refugio.views.transaction.atomic", return_value=nullcontext()),
@@ -1395,18 +1402,24 @@ class GestionSolicitudesTests(SimpleTestCase):
             personal_filter.return_value.exists.return_value = False
             estado_activo = SimpleNamespace(pk=20)
             estado_filter.return_value.first.return_value = estado_activo
+            personal_creado = SimpleNamespace(pk="12345678-9")
+            personal_create.return_value = personal_creado
             response = views.gestion_solicitudes(request)
-        self.assertEqual(response.status_code, 302)
         self.assertEqual(response.status_code, 302)
         personal_create.assert_called_once_with(
             rut_personal="12345678-9",
-            rol="cuidador",
+            rol="veterinario",
             fecha_ingreso=date(2026, 10, 28),
             telefono_emergencia=987654321,
             direccion="Calle de prueba 123",
             id_usuario=usuario,
             id_estado=estado_activo,
             id_solicitud_vol=solicitud,
+        )
+        veterinarian_create.assert_called_once_with(
+            rut_personal=personal_creado,
+            especialidad="Animales menores",
+            experiencia=5,
         )
 
     def test_non_admin_can_approve_volunteer_application_without_creating_personal(self):
@@ -2119,14 +2132,16 @@ class RegistroUsuarioTests(SimpleTestCase):
 
 
 class AltaPersonalDesdeSolicitudFormTests(SimpleTestCase):
-    def get_form(self, rut):
+    def get_form(self, rut, **extra_data):
+        data = {
+            "rut_personal": rut,
+            "rol": "cuidador",
+            "telefono_emergencia": "987654321",
+            "direccion": "Calle de prueba 123",
+        }
+        data.update(extra_data)
         return AltaPersonalDesdeSolicitudForm(
-            data={
-                "rut_personal": rut,
-                "rol": "cuidador",
-                "telefono_emergencia": "987654321",
-                "direccion": "Calle de prueba 123",
-            }
+            data=data
         )
 
     def test_rut_accepts_formatted_and_unformatted_values(self):
@@ -2150,6 +2165,43 @@ class AltaPersonalDesdeSolicitudFormTests(SimpleTestCase):
 
                 self.assertFalse(form.is_valid())
                 self.assertIn("rut_personal", form.errors)
+
+    def test_veterinarian_role_requires_specialty_and_experience(self):
+        form = self.get_form("12.345.678-5", rol="veterinario")
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("especialidad", form.errors)
+        self.assertIn("experiencia", form.errors)
+
+    def test_veterinarian_role_accepts_zero_years_experience(self):
+        form = self.get_form(
+            "12.345.678-5",
+            rol="veterinario",
+            especialidad="Animales menores",
+            experiencia="0",
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["experiencia"], 0)
+
+    def test_veterinarian_experience_must_fit_nonnegative_smallint_range(self):
+        for years in ("-1", "32768"):
+            with self.subTest(years=years):
+                form = self.get_form(
+                    "12.345.678-5",
+                    rol="veterinario",
+                    especialidad="Animales menores",
+                    experiencia=years,
+                )
+
+                self.assertFalse(form.is_valid())
+                self.assertIn("experiencia", form.errors)
+
+    def test_non_veterinarian_role_does_not_require_veterinary_details(self):
+        form = self.get_form("12.345.678-5", rol="cuidador")
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["experiencia"], None)
 
 
 class LoginUsuarioTests(SimpleTestCase):

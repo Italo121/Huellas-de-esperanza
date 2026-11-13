@@ -245,6 +245,7 @@
 
                     {% if es_admin and solicitud.id_estado.nombre == "Aprobada" %}
                     <form method="post" class="border-top mt-3 pt-3"
+                          data-staff-form
                           action="{% url 'gestion_solicitudes' %}">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="incorporar_personal">
@@ -284,6 +285,8 @@
                                 </label>
                                 <select class="form-select" name="rol"
                                         id="rol-personal-{{ solicitud.id_solicitud_vol }}"
+                                        data-staff-role
+                                        aria-controls="datos-veterinario-{{ solicitud.id_solicitud_vol }}"
                                         required>
                                     <option value="">Selecciona un rol</option>
                                     {% for value, label in personal_form.fields.rol.choices %}
@@ -298,6 +301,42 @@
                                     {{ personal_form.rol.errors|join:", " }}
                                 </div>
                                 {% endif %}
+                            </div>
+                            <div class="col-12" id="datos-veterinario-{{ solicitud.id_solicitud_vol }}"
+                                 data-veterinarian-fields hidden>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label"
+                                               for="especialidad-veterinaria-{{ solicitud.id_solicitud_vol }}">
+                                            {{ personal_form.especialidad.label }}
+                                        </label>
+                                        <input class="form-control" type="text"
+                                               name="especialidad"
+                                               id="especialidad-veterinaria-{{ solicitud.id_solicitud_vol }}"
+                                               value="{{ personal_form.especialidad.value|default:'' }}">
+                                        {% if personal_form.especialidad.errors %}
+                                        <div class="small text-danger mt-1">
+                                            {{ personal_form.especialidad.errors|join:", " }}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label"
+                                               for="experiencia-veterinario-{{ solicitud.id_solicitud_vol }}">
+                                            {{ personal_form.experiencia.label }}
+                                        </label>
+                                        <input class="form-control" type="number"
+                                               name="experiencia"
+                                               id="experiencia-veterinario-{{ solicitud.id_solicitud_vol }}"
+                                               min="0" max="32767"
+                                               value="{{ personal_form.experiencia.value|default:'' }}">
+                                        {% if personal_form.experiencia.errors %}
+                                        <div class="small text-danger mt-1">
+                                            {{ personal_form.experiencia.errors|join:", " }}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label"
@@ -726,4 +765,26 @@
         </section>
         {% endif %}
     </main>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            document.querySelectorAll("[data-staff-form]").forEach(function (form) {
+                const role = form.querySelector("[data-staff-role]");
+                const veterinarianFields = form.querySelector(
+                    "[data-veterinarian-fields]"
+                );
+                const specialty = form.querySelector('[name="especialidad"]');
+                const experience = form.querySelector('[name="experiencia"]');
+
+                function updateVeterinarianFields() {
+                    const isVeterinarian = role.value === "veterinario";
+                    veterinarianFields.hidden = !isVeterinarian;
+                    specialty.required = isVeterinarian;
+                    experience.required = isVeterinarian;
+                }
+
+                role.addEventListener("change", updateVeterinarianFields);
+                updateVeterinarianFields();
+            });
+        });
+    </script>
 {% endblock %}

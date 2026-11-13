@@ -251,6 +251,25 @@ class AltaPersonalDesdeSolicitudForm(forms.Form):
         label="Rol en el refugio",
         widget=forms.Select(attrs={"class": "form-select"}),
     )
+    especialidad = forms.CharField(
+        required=False,
+        label="Especialidad veterinaria",
+        widget=forms.TextInput(
+            attrs={
+                "class": "form-control",
+                "autocomplete": "off",
+            }
+        ),
+    )
+    experiencia = forms.IntegerField(
+        required=False,
+        min_value=0,
+        max_value=32767,
+        label="Años de experiencia",
+        widget=forms.NumberInput(
+            attrs={"class": "form-control", "min": "0", "max": "32767"}
+        ),
+    )
     telefono_emergencia = forms.IntegerField(
         min_value=0,
         max_value=2147483647,
@@ -268,6 +287,19 @@ class AltaPersonalDesdeSolicitudForm(forms.Form):
 
     def clean_rut_personal(self):
         return normalize_chilean_rut(self.cleaned_data["rut_personal"])
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("rol") != "veterinario":
+            cleaned_data["especialidad"] = ""
+            cleaned_data["experiencia"] = None
+            return cleaned_data
+
+        if not cleaned_data.get("especialidad"):
+            self.add_error("especialidad", "Ingresa la especialidad veterinaria.")
+        if cleaned_data.get("experiencia") is None:
+            self.add_error("experiencia", "Ingresa los años de experiencia.")
+        return cleaned_data
 
 
 class FiltroFechaSolicitudForm(forms.Form):
