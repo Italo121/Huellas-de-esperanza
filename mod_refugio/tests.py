@@ -283,6 +283,20 @@ class AccountNavigationTests(SimpleTestCase):
         self.assertIn('action="/refugio/logout/"', html)
         self.assertNotIn("Iniciar sesión", html)
 
+    def test_account_menu_trims_existing_full_session_name(self):
+        request = RequestFactory().get("/refugio/informacion/")
+        request.session = {
+            "refugio_usuario": {
+                "nombre": "Ana María Prueba Apellido",
+                "correo": "ana@example.com",
+            }
+        }
+
+        html = render_to_string("_account_nav.html", request=request)
+
+        self.assertIn("Ana Prueba", html)
+        self.assertNotIn("Ana María Prueba Apellido", html)
+
     @patch("mod_refugio.views.messages.success")
     def test_logout_clears_user_and_redirects_to_home(self, success_message):
         request = RequestFactory().post("/refugio/logout/")
@@ -2236,9 +2250,9 @@ class LoginUsuarioTests(SimpleTestCase):
                 pk=1,
                 supabase_uid=auth_user_id,
                 p_nombre="Ana",
-                s_nombre="",
+                s_nombre="María",
                 ap_paterno="Prueba",
-                ap_materno="",
+                ap_materno="Apellido",
                 correo="ana@example.com",
             ),
         ]
@@ -2259,6 +2273,7 @@ class LoginUsuarioTests(SimpleTestCase):
         )
         self.assertEqual(pending_user.supabase_uid, auth_user_id)
         self.assertEqual(request.session["refugio_usuario"]["id"], auth_user_id)
+        self.assertEqual(request.session["refugio_usuario"]["nombre"], "Ana Prueba")
         self.assertEqual(
             request.session["supabase_access_token"],
             "access-token",

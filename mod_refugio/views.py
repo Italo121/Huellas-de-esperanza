@@ -1851,14 +1851,7 @@ def login_usuario(request):
     )
 
     nombre = " ".join(
-        parte
-        for parte in (
-            usuario.p_nombre,
-            usuario.s_nombre,
-            usuario.ap_paterno,
-            usuario.ap_materno,
-        )
-        if parte
+        parte for parte in (usuario.p_nombre, usuario.ap_paterno) if parte
     )
     request.session["refugio_usuario"] = {
         "id": str(usuario.supabase_uid),

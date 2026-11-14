@@ -11,7 +11,7 @@
             <button class="btn btn-light dropdown-toggle" type="button"
                     data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="bi bi-person-circle me-1" aria-hidden="true"></i>
-                {{ request.session.refugio_usuario.nombre|default:"Mi cuenta" }}
+                {{ nombre_usuario_navbar|default:"Mi cuenta" }}
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
                 {% if request.session.refugio_usuario %}
