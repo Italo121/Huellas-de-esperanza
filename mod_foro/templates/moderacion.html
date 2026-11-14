@@ -1,9 +1,11 @@
+
 {% extends "index.html" %}
 
 {% block title %}Moderación del foro | Huellas de esperanza{% endblock %}
 
 {% block content %}
 <div class="container-fluid p-3 p-lg-4">
+
     {% if messages %}
         {% for message in messages %}
             <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags|default:'info' }}{% endif %} alert-dismissible fade show" role="alert">
@@ -13,6 +15,7 @@
         {% endfor %}
     {% endif %}
 
+    <!-- Encabezado -->
     <header class="mb-4">
         <h1 class="h2 fw-bold text-success">
             <i class="bi bi-shield-check me-2" aria-hidden="true"></i>
@@ -23,11 +26,17 @@
         </p>
     </header>
 
+    <!-- Filtro de publicaciones -->
     <form method="get" class="row g-2 align-items-end mb-4" aria-label="Filtrar publicaciones por tipo">
+
         <div class="col-sm-6 col-md-4">
-            <label for="tipo-publicacion" class="form-label">Tipo de publicación</label>
+            <label for="tipo-publicacion" class="form-label">
+                Tipo de publicación
+            </label>
+
             <select id="tipo-publicacion" name="tipo" class="form-select">
                 <option value="">Todos los tipos</option>
+
                 {% for valor, etiqueta in tipos_publicacion %}
                     <option value="{{ valor }}" {% if valor == tipo_seleccionado %}selected{% endif %}>
                         {{ etiqueta }}
@@ -35,100 +44,297 @@
                 {% endfor %}
             </select>
         </div>
+
         <div class="col-auto">
-            <button type="submit" class="btn btn-outline-success">Filtrar</button>
+            <button type="submit" class="btn btn-outline-success">
+                <i class="bi bi-funnel me-1"></i>
+                Filtrar
+            </button>
+
             {% if tipo_seleccionado %}
-                <a href="{% url 'mod_foro:moderacion' %}" class="btn btn-outline-secondary">Limpiar</a>
+                <a href="{% url 'mod_foro:moderacion' %}" class="btn btn-outline-secondary">
+                    Limpiar
+                </a>
             {% endif %}
         </div>
+
     </form>
 
+    <!-- Listado de publicaciones -->
     <section aria-labelledby="publicaciones-moderacion">
+
         <h2 class="h4 fw-bold mb-3" id="publicaciones-moderacion">
-            Publicaciones <span class="badge rounded-pill bg-success">{{ publicaciones|length }}</span>
+            Publicaciones
+            <span class="badge rounded-pill bg-success">
+                {{ page_obj.paginator.count }}
+            </span>
         </h2>
 
         {% for publicacion in publicaciones %}
+
             <article class="card border-0 shadow-sm rounded-4 mb-4" id="publicacion-{{ publicacion.pk }}">
+
                 <div class="card-body p-3 p-md-4">
-                    <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                        <div>
-                            <h3 class="h5 fw-bold mb-1">{{ publicacion.titulo }}</h3>
+
+                    <!-- Encabezado de publicación y botones -->
+                    <div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-3">
+
+                        <!-- Información de publicación -->
+                        <div class="flex-grow-1">
+
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ publicacion.titulo }}
+                            </h3>
+
                             <p class="small text-secondary mb-1">
                                 {{ publicacion.categoria|capfirst }}
                                 <span aria-hidden="true">·</span>
-                                <time datetime="{{ publicacion.fecha_publicacion|date:'c' }}">{{ publicacion.fecha_publicacion|date:"d/m/Y" }}</time>
+                                <time datetime="{{ publicacion.fecha_publicacion|date:'c' }}">
+                                    {{ publicacion.fecha_publicacion|date:"d/m/Y" }}
+                                </time>
                             </p>
+
                             <span class="badge {% if publicacion.id_estado.nombre == 'Publicada' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
                                 {{ publicacion.id_estado.nombre }}
                             </span>
+
                         </div>
-                        {% if publicacion.id_estado.nombre == "Publicada" %}
-                            <form method="post" action="{% url 'mod_foro:ocultar_publicacion' publicacion.pk %}">
+
+                        <!-- Botones de publicación a la derecha -->
+                        <div class="d-flex gap-2 flex-wrap justify-content-end">
+
+                            {% if publicacion.id_estado.nombre == "Publicada" %}
+                                <form method="post" action="{% url 'mod_foro:ocultar_publicacion' publicacion.pk %}">
+                                    {% csrf_token %}
+
+                                    <button class="btn btn-sm btn-outline-secondary" type="submit">
+                                        <i class="bi bi-eye-slash me-1"></i>
+                                        Ocultar publicación
+                                    </button>
+                                </form>
+                            {% endif %}
+
+                            <form
+                                method="post"
+                                action="{% url 'mod_foro:eliminar_publicacion' publicacion.pk %}"
+                                onsubmit="return confirm('¿Eliminar permanentemente esta publicación y todos sus comentarios? Esta acción no se puede deshacer.');"
+                            >
                                 {% csrf_token %}
-                                <button class="btn btn-sm btn-outline-secondary" type="submit">Ocultar publicación</button>
+
+                                <button class="btn btn-sm btn-outline-danger" type="submit">
+                                    <i class="bi bi-trash me-1"></i>
+                                    Eliminar publicación
+                                </button>
                             </form>
-                        {% endif %}
-                        <form
-                            method="post"
-                            action="{% url 'mod_foro:eliminar_publicacion' publicacion.pk %}"
-                            onsubmit="return confirm('¿Eliminar permanentemente esta publicación y todos sus comentarios? Esta acción no se puede deshacer.');"
-                        >
-                            {% csrf_token %}
-                            <button class="btn btn-sm btn-outline-danger" type="submit">
-                                Eliminar publicación
-                            </button>
-                        </form>
+
+                        </div>
+
                     </div>
 
-                    <p class="mb-3" style="white-space: pre-line;">{{ publicacion.contenido }}</p>
-                    <p class="small text-secondary mb-3">
-                        <i class="bi bi-geo-alt me-1" aria-hidden="true"></i>{{ publicacion.ubicacion }}
+                    <!-- Contenido de publicación -->
+                    <p class="mb-3" style="white-space: pre-line;">
+                        {{ publicacion.contenido }}
                     </p>
 
+                    <p class="small text-secondary mb-3">
+                        <i class="bi bi-geo-alt me-1" aria-hidden="true"></i>
+                        {{ publicacion.ubicacion }}
+                    </p>
+
+                    <!-- Sección de comentarios -->
                     <div class="border-top pt-3">
+
                         <h4 class="h6 fw-bold mb-3">
                             <i class="bi bi-chat-dots text-success me-1" aria-hidden="true"></i>
-                            Comentarios <span class="text-secondary fw-normal">({{ publicacion.comentarios.all|length }})</span>
+                            Comentarios
+                            <span class="text-secondary fw-normal">
+                                ({{ publicacion.comentarios.all|length }})
+                            </span>
                         </h4>
 
                         {% for comentario in publicacion.comentarios.all %}
+                            {% if forloop.counter == 3 %}
+                                <details class="mb-3">
+                                    <summary class="text-success fw-semibold">Mostrar todos los comentarios</summary>
+                                    <div class="mt-2">
+                            {% endif %}
+
                             <div class="bg-light rounded-3 p-3 mb-2">
+
+                                <!-- Información del comentario -->
                                 <div class="d-flex justify-content-between flex-wrap gap-2 mb-1">
+
                                     <strong class="small">
-                                        {{ comentario.id_usuario.p_nombre }} {{ comentario.id_usuario.ap_paterno }}
+                                        {{ comentario.id_usuario.p_nombre }}
+                                        {{ comentario.id_usuario.ap_paterno }}
                                     </strong>
+
                                     <span class="badge {% if comentario.id_estado.nombre == 'Visible' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
                                         {{ comentario.id_estado.nombre }}
                                     </span>
+
                                 </div>
+
+                                <!-- Fecha -->
                                 <p class="small text-secondary mb-1">
-                                    <time datetime="{{ comentario.fecha|date:'c' }}">{{ comentario.fecha|date:"d/m/Y" }}</time>
+                                    <time datetime="{{ comentario.fecha|date:'c' }}">
+                                        {{ comentario.fecha|date:"d/m/Y" }}
+                                    </time>
                                 </p>
-                                <p class="mb-0 small" style="white-space: pre-line;">{{ comentario.contenido }}</p>
-                                {% if comentario.id_estado.nombre == "Visible" %}
-                                    <form method="post" action="{% url 'mod_foro:ocultar_comentario' comentario.pk %}" class="mt-2">
+
+                                <!-- Contenido -->
+                                <p class="mb-0 small" style="white-space: pre-line;">
+                                    {{ comentario.contenido }}
+                                </p>
+
+                                <!-- Botones de comentario en horizontal -->
+                                <div class="d-flex gap-2 flex-wrap mt-3">
+
+                                    {% if comentario.id_estado.nombre == "Visible" %}
+
+                                        <form method="post" action="{% url 'mod_foro:ocultar_comentario' comentario.pk %}">
+                                            {% csrf_token %}
+
+                                            <button class="btn btn-sm btn-outline-secondary" type="submit">
+                                                <i class="bi bi-eye-slash me-1"></i>
+                                                Ocultar comentario
+                                            </button>
+                                        </form>
+
+                                    {% elif comentario.id_estado.nombre == "Oculto (Moderado)" %}
+
+                                        <form method="post" action="{% url 'mod_foro:mostrar_comentario' comentario.pk %}">
+                                            {% csrf_token %}
+
+                                            <button class="btn btn-sm btn-outline-success" type="submit">
+                                                <i class="bi bi-eye me-1"></i>
+                                                Volver a mostrar
+                                            </button>
+                                        </form>
+
+                                    {% endif %}
+
+                                    <form
+                                        method="post"
+                                        action="{% url 'mod_foro:eliminar_comentario' comentario.pk %}"
+                                        onsubmit="return confirm('¿Eliminar permanentemente este comentario? Esta acción no se puede deshacer.');"
+                                    >
                                         {% csrf_token %}
-                                        <button class="btn btn-sm btn-outline-secondary" type="submit">Ocultar comentario</button>
+
+                                        <button class="btn btn-sm btn-outline-danger" type="submit">
+                                            <i class="bi bi-trash me-1"></i>
+                                            Eliminar comentario
+                                        </button>
                                     </form>
-                                {% elif comentario.id_estado.nombre == "Oculto (Moderado)" %}
-                                    <form method="post" action="{% url 'mod_foro:mostrar_comentario' comentario.pk %}" class="mt-2">
-                                        {% csrf_token %}
-                                        <button class="btn btn-sm btn-outline-success" type="submit">Volver a mostrar comentario</button>
-                                    </form>
-                                {% endif %}
+
+                                </div>
+
                             </div>
+
+                            {% if forloop.last and forloop.counter > 2 %}
+                                    </div>
+                                </details>
+                            {% endif %}
+
                         {% empty %}
-                            <p class="small text-secondary mb-0">Esta publicación aún no tiene comentarios.</p>
+
+                            <p class="small text-secondary mb-0">
+                                Esta publicación aún no tiene comentarios.
+                            </p>
+
                         {% endfor %}
+
                     </div>
+
                 </div>
+
             </article>
+
         {% empty %}
+
             <div class="text-center bg-white border rounded-4 p-5">
-                <h3 class="h5">Todavía no hay publicaciones</h3>
+                <i class="bi bi-chat-square-text text-secondary fs-1 mb-3"></i>
+
+                <h3 class="h5">
+                    Todavía no hay publicaciones
+                </h3>
             </div>
+
         {% endfor %}
+
+        <!-- Paginación -->
+        {% if page_obj.has_other_pages %}
+
+            <nav aria-label="Paginación de publicaciones">
+
+                <ul class="pagination justify-content-center">
+
+                    <!-- Anterior -->
+                    {% if page_obj.has_previous %}
+
+                        <li class="page-item">
+                            <a
+                                class="page-link"
+                                href="?{% if tipo_seleccionado %}tipo={{ tipo_seleccionado|urlencode }}&amp;{% endif %}page={{ page_obj.previous_page_number }}"
+                                aria-label="Página anterior"
+                            >
+                                Anterior
+                            </a>
+                        </li>
+
+                    {% else %}
+
+                        <li class="page-item disabled">
+                            <span class="page-link">Anterior</span>
+                        </li>
+
+                    {% endif %}
+
+                    <!-- Números de página -->
+                    {% for numero in page_obj.paginator.page_range %}
+
+                        <li class="page-item {% if numero == page_obj.number %}active{% endif %}">
+
+                            <a
+                                class="page-link"
+                                href="?{% if tipo_seleccionado %}tipo={{ tipo_seleccionado|urlencode }}&amp;{% endif %}page={{ numero }}"
+                                {% if numero == page_obj.number %}aria-current="page"{% endif %}
+                            >
+                                {{ numero }}
+                            </a>
+
+                        </li>
+
+                    {% endfor %}
+
+                    <!-- Siguiente -->
+                    {% if page_obj.has_next %}
+
+                        <li class="page-item">
+                            <a
+                                class="page-link"
+                                href="?{% if tipo_seleccionado %}tipo={{ tipo_seleccionado|urlencode }}&amp;{% endif %}page={{ page_obj.next_page_number }}"
+                                aria-label="Página siguiente"
+                            >
+                                Siguiente
+                            </a>
+                        </li>
+
+                    {% else %}
+
+                        <li class="page-item disabled">
+                            <span class="page-link">Siguiente</span>
+                        </li>
+
+                    {% endif %}
+
+                </ul>
+
+            </nav>
+
+        {% endif %}
+
     </section>
+
 </div>
 {% endblock %}

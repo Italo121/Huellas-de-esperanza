@@ -3,6 +3,7 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Exists, OuterRef, Prefetch
 from django.http import HttpResponse, HttpResponseForbidden
@@ -18,12 +19,20 @@ from .models import Comentario, Publicacion, PublicacionPersonal
 
 logger = logging.getLogger(__name__)
 
+PUBLICACIONES_POR_PAGINA = 5
+
 
 TIPOS_PUBLICACION = tuple(
     (valor, etiqueta)
     for valor, etiqueta in PublicacionForm.base_fields["categoria"].choices
     if valor
 )
+
+
+def _pagina_publicaciones(request, publicaciones):
+    return Paginator(publicaciones, PUBLICACIONES_POR_PAGINA).get_page(
+        request.GET.get("page")
+    )
 
 
 def publicaciones(request):
@@ -59,11 +68,13 @@ def moderacion(request):
                 )
             )
         )
+        pagina = _pagina_publicaciones(request, publicaciones)
         return render(
             request,
             "moderacion.html",
             {
-                "publicaciones": publicaciones,
+                "publicaciones": pagina.object_list,
+                "page_obj": pagina,
                 "tipos_publicacion": TIPOS_PUBLICACION,
                 "tipo_seleccionado": tipo_seleccionado,
             },
@@ -101,11 +112,13 @@ def _render_publicaciones(request, publicacion_form=None):
         )
         .all()
     )
+    pagina = _pagina_publicaciones(request, publicaciones)
     return render(
         request,
         "publicaciones.html",
         {
-            "publicaciones": publicaciones,
+            "publicaciones": pagina.object_list,
+            "page_obj": pagina,
             "publicacion_form": (
                 publicacion_form if publicacion_form is not None else PublicacionForm()
             ),
@@ -261,6 +274,31 @@ def mostrar_comentario(request, comentario_id):
         "Visible",
         "El comentario volvió a estar visible.",
     )
+
+
+@require_POST
+def eliminar_comentario(request, comentario_id):
+    error_response = _personal_de_sesion(request)
+    if error_response is not None:
+        return error_response
+
+    publicacion_id = None
+    try:
+        with transaction.atomic():
+            comentario = get_object_or_404(
+                Comentario.objects.select_for_update(),
+                pk=comentario_id,
+            )
+            publicacion_id = comentario.publicacion_id
+            comentario.delete()
+    except DatabaseError:
+        logger.exception("No se pudo eliminar el comentario %s", comentario_id)
+        messages.error(request, "No se pudo eliminar el comentario. Inténtalo nuevamente.")
+    else:
+        messages.success(request, "El comentario se eliminó permanentemente.")
+
+    ancla = f"#publicacion-{publicacion_id}" if publicacion_id is not None else ""
+    return redirect(f"{reverse('mod_foro:moderacion')}{ancla}")
 
 
 def _cambiar_estado_foro(

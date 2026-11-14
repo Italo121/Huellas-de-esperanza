@@ -98,7 +98,7 @@
             <h2 class="h4 fw-bold mb-0" id="publicaciones-titulo">
                 Publicaciones
             </h2>
-            <span class="badge rounded-pill bg-success">{{ publicaciones|length }}</span>
+            <span class="badge rounded-pill bg-success">{{ page_obj.paginator.count }}</span>
         </div>
 
         {% for publicacion in publicaciones %}
@@ -137,6 +137,11 @@
                         </h4>
 
                         {% for comentario in publicacion.comentarios.all %}
+                            {% if forloop.counter == 3 %}
+                                <details class="mb-3">
+                                    <summary class="text-success fw-semibold">Mostrar todos los comentarios</summary>
+                                    <div class="mt-2">
+                            {% endif %}
                             <div class="bg-light rounded-3 p-3 mb-2">
                                 <div class="d-flex justify-content-between flex-wrap gap-1 mb-1">
                                     <strong class="small">{{ comentario.id_usuario.p_nombre }} {{ comentario.id_usuario.ap_paterno }}</strong>
@@ -144,6 +149,10 @@
                                 </div>
                                 <p class="mb-0 small" style="white-space: pre-line;">{{ comentario.contenido }}</p>
                             </div>
+                            {% if forloop.last and forloop.counter > 2 %}
+                                    </div>
+                                </details>
+                            {% endif %}
                         {% empty %}
                             <p class="small text-secondary mb-3">Aún no hay comentarios. ¡Sé el primero en participar!</p>
                         {% endfor %}
@@ -171,6 +180,34 @@
                 <p class="text-secondary mb-0">Cuando alguien comparta algo, aparecerá aquí.</p>
             </div>
         {% endfor %}
+
+        {% if page_obj.has_other_pages %}
+            <nav aria-label="Paginación de publicaciones">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}" aria-label="Página anterior">Anterior</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+                    {% endif %}
+
+                    {% for numero in page_obj.paginator.page_range %}
+                        <li class="page-item {% if numero == page_obj.number %}active{% endif %}">
+                            <a class="page-link" href="?page={{ numero }}" {% if numero == page_obj.number %}aria-current="page"{% endif %}>{{ numero }}</a>
+                        </li>
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.next_page_number }}" aria-label="Página siguiente">Siguiente</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">Siguiente</span></li>
+                    {% endif %}
+                </ul>
+            </nav>
+        {% endif %}
     </section>
 </div>
 {% endblock %}

@@ -33,4 +33,9 @@ urlpatterns = [
         views.mostrar_comentario,
         name="mostrar_comentario",
     ),
+    path(
+        "comentarios/<int:comentario_id>/eliminar/",
+        views.eliminar_comentario,
+        name="eliminar_comentario",
+    ),
 ]

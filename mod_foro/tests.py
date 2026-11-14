@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
 from django import forms
+from django.core.paginator import Paginator
 from django.template import Context
 from django.template.loader import get_template
 from django.test import RequestFactory, SimpleTestCase
@@ -101,6 +102,36 @@ class ForoFormTests(SimpleTestCase):
         self.assertEqual(reverse("mod_foro:publicaciones"), "/foro/")
         self.assertEqual(reverse("mod_foro:moderacion"), "/foro/moderacion/")
 
+    def test_publicaciones_se_paginan_de_cinco_en_cinco_y_ordenadas_por_recencia(self):
+        request = RequestFactory().get("/foro/?page=2")
+
+        pagina = views._pagina_publicaciones(request, list(range(23)))
+
+        self.assertEqual(pagina.object_list, list(range(5, 10)))
+        self.assertEqual(pagina.paginator.per_page, 5)
+        self.assertEqual(
+            Publicacion._meta.ordering,
+            ("-fecha_publicacion", "-id_publicacion"),
+        )
+
+    def test_contador_muestra_el_total_de_publicaciones_en_ambas_vistas(self):
+        context = {
+            "publicaciones": [],
+            "page_obj": Paginator(range(14), 5).get_page(1),
+            "usuario_conectado": None,
+            "publicacion_form": PublicacionForm(),
+            "tipo_seleccionado": "",
+            "tipos_publicacion": (),
+        }
+
+        for plantilla in ("publicaciones.html", "moderacion.html"):
+            with self.subTest(plantilla=plantilla):
+                html = get_template(plantilla).template.render(Context(context))
+                self.assertRegex(
+                    html,
+                    r'<span class="badge rounded-pill bg-success">\s*14\s*</span>',
+                )
+
     def test_vista_publica_filtra_publicaciones_y_comentarios_visibles(self):
         publicaciones = Mock()
         publicaciones.annotate.return_value = publicaciones
@@ -159,23 +190,80 @@ class ForoFormTests(SimpleTestCase):
         self.assertIn("Publicación del personal", html)
         self.assertIn("border-success", html)
 
+    def test_comentarios_se_despliegan_desde_el_tercero_en_ambas_vistas(self):
+        usuario = SimpleNamespace(p_nombre="Ana", ap_paterno="Pérez")
+        comentarios = [
+            SimpleNamespace(
+                pk=numero,
+                id_usuario=usuario,
+                id_estado=SimpleNamespace(nombre="Visible"),
+                fecha=date(2026, 11, numero),
+                contenido=f"Comentario {numero}",
+            )
+            for numero in range(1, 4)
+        ]
+        publicacion = SimpleNamespace(
+            pk=12,
+            titulo="Aviso del refugio",
+            categoria="rescate",
+            fecha_publicacion=date(2026, 11, 13),
+            es_publicacion_personal=False,
+            contenido="Información para la comunidad.",
+            ubicacion="Santiago",
+            comentarios=SimpleNamespace(all=lambda: comentarios),
+            id_estado=SimpleNamespace(nombre="Publicada"),
+        )
+        context = {
+            "publicaciones": [publicacion],
+            "page_obj": Paginator([publicacion], 5).get_page(1),
+            "usuario_conectado": None,
+            "publicacion_form": PublicacionForm(),
+            "tipos_publicacion": (),
+            "tipo_seleccionado": "",
+        }
+
+        for plantilla in ("publicaciones.html", "moderacion.html"):
+            with self.subTest(plantilla=plantilla):
+                html = get_template(plantilla).template.render(Context(context))
+                inicio_desplegable = html.index("<details")
+                self.assertLess(html.index("Comentario 1"), inicio_desplegable)
+                self.assertLess(html.index("Comentario 2"), inicio_desplegable)
+                self.assertGreater(html.index("Comentario 3"), inicio_desplegable)
+                self.assertIn("Mostrar todos los comentarios", html)
+
+                context["publicaciones"][0].comentarios = SimpleNamespace(
+                    all=lambda: comentarios[:2]
+                )
+                html_con_dos = get_template(plantilla).template.render(Context(context))
+                self.assertNotIn("<details", html_con_dos)
+
+                context["publicaciones"][0].comentarios = SimpleNamespace(
+                    all=lambda: comentarios
+                )
+
     def test_solo_personal_puede_abrir_moderacion(self):
         request = RequestFactory().get("/foro/moderacion/")
         request.session = {"refugio_usuario": {"id": "staff-uuid"}}
+        pagina = SimpleNamespace(object_list=[])
 
         with (
             patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch("mod_foro.views.Paginator") as paginador,
             patch("mod_foro.views.render", return_value=object()) as render,
         ):
             personal_filter.return_value.exists.return_value = True
+            paginador.return_value.get_page.return_value = pagina
             response = views.moderacion(request)
 
         self.assertIs(response, render.return_value)
         personal_filter.assert_called_once_with(
             id_usuario__supabase_uid="staff-uuid",
         )
+        paginador.assert_called_once()
+        self.assertEqual(paginador.call_args.args[1], 5)
+        paginador.return_value.get_page.assert_called_once_with(None)
         self.assertEqual(render.call_args.args[1], "moderacion.html")
-        queryset = render.call_args.args[2]["publicaciones"]
+        queryset = paginador.call_args.args[0]
         self.assertEqual(
             [condition.rhs for condition in queryset.query.where.children],
             ["Publicacion"],
@@ -189,11 +277,12 @@ class ForoFormTests(SimpleTestCase):
     def test_moderacion_filtra_publicaciones_por_tipo(self):
         request = RequestFactory().get(
             "/foro/moderacion/",
-            {"tipo": "rescate"},
+            {"tipo": "rescate", "page": "2"},
         )
         request.session = {"refugio_usuario": {"id": "staff-uuid"}}
         publicaciones = Mock()
         publicaciones.filter.return_value = publicaciones
+        pagina = SimpleNamespace(object_list=[])
 
         with (
             patch("mod_foro.views.Personal.objects.filter") as personal_filter,
@@ -201,9 +290,11 @@ class ForoFormTests(SimpleTestCase):
                 "mod_foro.views.Publicacion.objects.filter",
                 return_value=publicaciones,
             ) as filtrar_publicaciones,
+            patch("mod_foro.views.Paginator") as paginador,
             patch("mod_foro.views.render") as render,
         ):
             personal_filter.return_value.exists.return_value = True
+            paginador.return_value.get_page.return_value = pagina
             views.moderacion(request)
 
         filtrar_publicaciones.assert_called_once_with(
@@ -211,7 +302,10 @@ class ForoFormTests(SimpleTestCase):
         )
         publicaciones.filter.assert_called_once_with(categoria="rescate")
         context = render.call_args.args[2]
+        self.assertEqual(context["publicaciones"], [])
         self.assertEqual(context["tipo_seleccionado"], "rescate")
+        self.assertEqual(paginador.call_args.args[1], 5)
+        paginador.return_value.get_page.assert_called_once_with("2")
         self.assertEqual(
             context["tipos_publicacion"],
             (("adopcion", "Adopción"), ("rescate", "Rescate")),
@@ -317,6 +411,13 @@ class ForoFormTests(SimpleTestCase):
                 args=(34,),
             ),
             "/foro/comentarios/34/mostrar/",
+        )
+        self.assertEqual(
+            reverse(
+                "mod_foro:eliminar_comentario",
+                args=(34,),
+            ),
+            "/foro/comentarios/34/eliminar/",
         )
 
     def test_personal_puede_ocultar_publicacion_cambiando_su_estado(self):
@@ -545,6 +646,48 @@ class ForoFormTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 403)
         buscar.assert_not_called()
+
+    def test_personal_puede_eliminar_comentario(self):
+        request = RequestFactory().post("/foro/comentarios/34/eliminar/")
+        request.session = {"refugio_usuario": {"id": "staff-uuid"}}
+        comentario = Mock(publicacion_id=12)
+
+        with (
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch("mod_foro.views.Comentario.objects.select_for_update") as bloquear,
+            patch("mod_foro.views.get_object_or_404", return_value=comentario) as buscar,
+            patch("mod_foro.views.transaction.atomic", return_value=nullcontext()),
+            patch("mod_foro.views.messages.success") as success,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.eliminar_comentario(request, 34)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/foro/moderacion/#publicacion-12")
+        buscar.assert_called_once_with(bloquear.return_value, pk=34)
+        comentario.delete.assert_called_once_with()
+        success.assert_called_once()
+
+    def test_usuario_sin_personal_no_puede_eliminar_comentario(self):
+        request = RequestFactory().post("/foro/comentarios/34/eliminar/")
+        request.session = {"refugio_usuario": {"id": "user-uuid"}}
+
+        with (
+            patch("mod_foro.views.Personal.objects.filter") as personal_filter,
+            patch("mod_foro.views.Comentario.objects.select_for_update") as bloquear,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.eliminar_comentario(request, 34)
+
+        self.assertEqual(response.status_code, 403)
+        bloquear.assert_not_called()
+
+    def test_eliminar_comentario_solo_acepta_post(self):
+        response = self.client.get(
+            reverse("mod_foro:eliminar_comentario", args=(34,))
+        )
+
+        self.assertEqual(response.status_code, 405)
 
     def test_modelos_usan_las_tablas_existentes(self):
         self.assertEqual(Publicacion._meta.db_table, "publicacion")
