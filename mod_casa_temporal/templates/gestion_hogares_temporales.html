@@ -1,0 +1,196 @@
+{% extends "index.html" %}
+
+{% block content %}
+<main class="container py-4">
+    <header class="mb-4">
+        <h1 class="h2 fw-bold">Gestión de hogares temporales</h1>
+        <p class="text-secondary mb-0">
+            Administra los hogares aprobados, sus animales asignados y su estado.
+        </p>
+    </header>
+
+    {% for message in messages %}
+    <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}"
+         role="status">{{ message }}</div>
+    {% endfor %}
+
+    {% if error %}
+    <div class="alert alert-danger" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <section class="card border-0 shadow-sm mb-4" aria-labelledby="hogares-activos-titulo">
+        <div class="card-body">
+            <h2 class="h4 fw-bold mb-3" id="hogares-activos-titulo">Hogares activos del refugio</h2>
+            {% if hogares_activos %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th scope="col">Hogar</th>
+                            <th scope="col">Localidad</th>
+                            <th scope="col">Animales activos</th>
+                            <th scope="col">Gestión</th>
+                            <th scope="col">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for hogar in hogares_activos %}
+                        <tr>
+                            <th scope="row">Hogar temporal {{ hogar.id_casa }}</th>
+                            <td>{{ hogar.poblacion }}</td>
+                            <td>{{ hogar.animales_activos }}</td>
+                            <td>
+                                <a class="btn btn-outline-success btn-sm"
+                                   href="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}?casa={{ hogar.id_casa }}#hogar-seleccionado">
+                                    Gestionar
+                                </a>
+                            </td>
+                            <td>
+                                {% if hogar.animales_activos == 0 %}
+                                <form method="post" class="d-inline"
+                                      action="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="desactivar_hogar">
+                                    <input type="hidden" name="casa_id" value="{{ hogar.id_casa }}">
+                                    <button class="btn btn-outline-danger btn-sm" type="submit"
+                                            onclick="return confirm('¿Marcar este hogar como inactivo?');">
+                                        Marcar inactivo
+                                    </button>
+                                </form>
+                                {% else %}
+                                <span class="badge text-bg-success">Activo</span>
+                                <span class="small text-secondary d-block">
+                                    Debe quedar sin animales para desactivarlo.
+                                </span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">No hay hogares activos aprobados actualmente.</p>
+            {% endif %}
+        </div>
+    </section>
+
+    {% if hogar_seleccionado %}
+    <section id="hogar-seleccionado" class="card border-0 shadow-sm"
+             aria-labelledby="hogar-seleccionado-titulo">
+        <div class="card-body p-4">
+            <header class="mb-4">
+                <h2 class="h4 fw-bold mb-1" id="hogar-seleccionado-titulo">
+                    Hogar temporal {{ hogar_seleccionado.id_casa }}
+                </h2>
+                <p class="text-secondary mb-0">
+                    {{ hogar_seleccionado.calle }} {{ hogar_seleccionado.num_casa }},
+                    {{ hogar_seleccionado.poblacion }}
+                </p>
+            </header>
+
+            <section class="mb-4" aria-labelledby="asignar-animal-titulo">
+                <h3 class="h5 fw-bold mb-3" id="asignar-animal-titulo">Añadir animal</h3>
+                {% if form.fields.id_animal.queryset %}
+                <form method="post"
+                      action="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}?casa={{ hogar_seleccionado.id_casa }}#hogar-seleccionado">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="asignar_animal">
+                    <input type="hidden" name="casa_id" value="{{ hogar_seleccionado.id_casa }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="{{ form.id_animal.id_for_label }}">
+                            {{ form.id_animal.label }}
+                        </label>
+                        {{ form.id_animal }}
+                        {% if form.id_animal.errors %}
+                        <div class="small text-danger mt-1">
+                            {{ form.id_animal.errors|join:", " }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <button class="btn btn-success" type="submit">
+                        <i class="bi bi-plus-circle me-1" aria-hidden="true"></i>
+                        Añadir al hogar
+                    </button>
+                </form>
+                {% else %}
+                <div class="alert alert-info mb-0" role="status">
+                    No hay animales disponibles para asignar.
+                </div>
+                {% endif %}
+            </section>
+
+            <section aria-labelledby="animales-hogar-titulo">
+                <h3 class="h5 fw-bold mb-3" id="animales-hogar-titulo">
+                    Animales vinculados e historial
+                </h3>
+                {% if asignaciones_hogar %}
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr>
+                                <th scope="col">Animal</th>
+                                <th scope="col">Ingreso</th>
+                                <th scope="col">Salida</th>
+                                <th scope="col">Estado</th>
+                                <th scope="col">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for asignacion in asignaciones_hogar %}
+                            <tr>
+                                <th scope="row">
+                                    {{ asignacion.id_animal.nombre|default:asignacion.id_animal.especie }}
+                                    <span class="small text-secondary d-block">
+                                        {{ asignacion.id_animal.especie|capfirst }}
+                                        {% if asignacion.id_animal.sexo %}· {{ asignacion.id_animal.sexo|capfirst }}{% endif %}
+                                    </span>
+                                </th>
+                                <td>{{ asignacion.fecha_ingreso|date:"d/m/Y" }}</td>
+                                <td>
+                                    {% if asignacion.fecha_salida %}
+                                    {{ asignacion.fecha_salida|date:"d/m/Y" }}
+                                    {% else %}
+                                    —
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if asignacion.fecha_salida %}
+                                    <span class="badge text-bg-secondary">Finalizada</span>
+                                    {% else %}
+                                    <span class="badge text-bg-success">Activa</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if not asignacion.fecha_salida %}
+                                    <form method="post"
+                                          action="{% url 'mod_casa_temporal:gestion_hogares_temporales' %}?casa={{ hogar_seleccionado.id_casa }}#hogar-seleccionado">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="retirar_animal">
+                                        <input type="hidden" name="casa_id" value="{{ hogar_seleccionado.id_casa }}">
+                                        <input type="hidden" name="asignacion_id"
+                                               value="{{ asignacion.id_asignacion }}">
+                                        <button class="btn btn-outline-danger btn-sm" type="submit">
+                                            Registrar salida
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                    —
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-secondary mb-0">
+                    Este hogar todavía no tiene animales registrados.
+                </p>
+                {% endif %}
+            </section>
+        </div>
+    </section>
+    {% endif %}
+</main>
+{% endblock %}

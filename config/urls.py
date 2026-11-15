@@ -18,17 +18,28 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 from django.shortcuts import render
+from django.views.generic.base import RedirectView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
 
     # Página principal
-    path(
-        '',
-        RedirectView.as_view(pattern_name='inicio_refugio', permanent=False),
-        name='inicio',
-    ),
+    path('', RedirectView.as_view(pattern_name='informacion_refugio', permanent=False),name='inicio',),
 
     # Módulo del refugio
     path('refugio/', include('mod_refugio.urls')),
+    path('foro/', include('mod_foro.urls')),
+    path('adopcion/', include('mod_adopcion.urls')),
+    path(
+        'donacion/',
+        include(('mod_donacion.urls', 'mod_donacion'), namespace='mod_donacion'),
+    ),
+    path('casa-temporal/',include(('mod_casa_temporal.urls', 'mod_casa_temporal'),namespace='mod_casa_temporal',),),
+    path(
+        'estadisticas/',
+        include(
+            ('mod_estadistica_reporte.urls', 'mod_estadistica_reporte'),
+            namespace='mod_estadistica_reporte',
+        ),
+    ),
 ]

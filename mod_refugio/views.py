@@ -4,7 +4,6 @@ from decimal import Decimal
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from httpx import ReadTimeout
 from django.db import DatabaseError, transaction
 from django.db.models import Exists, OuterRef
 from django.http import JsonResponse
@@ -15,6 +14,16 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from httpx import ReadTimeout
+from mod_adopcion.forms import (
+    RespuestaDevolucionAdopcionForm,
+    RespuestaSolicitudAdopcionForm,
+)
+from mod_adopcion.models import Adopcion, DevolucionAdopcion
+from mod_adopcion.models import Estado as EstadoAdopcion
+from mod_adopcion.models import SolicitudAdopcion
+from mod_casa_temporal.forms import RespuestaSolicitudHogarTemporalForm
+from mod_casa_temporal.models import CasaTemporal, SolicitudHogarTemporal
 
 from .forms import (
     AltaPersonalDesdeSolicitudForm,
@@ -45,34 +54,34 @@ from .supabase_client import supabase, supabase_storage
 
 logger = logging.getLogger(__name__)
 
+from .forms import (
+    AltaPersonalDesdeSolicitudForm,
+    EditarAnimalForm,
+    EvaluacionAnimalForm,
+    FiltroFechaSolicitudForm,
+    GestionSolicitudVoluntariadoForm,
+    RegistroAnimalForm,
+    RegistroUsuarioForm,
+    SolicitudVoluntariadoForm,
+    TratamientoAnimalForm,
+    VacunaAnimalForm,
+)
+from .models import (
+    Animal,
+    EvaluacionAnimal,
+    Estado,
+    Personal,
+    Rescate,
+    Refugio,
+    SolicitudVoluntariado,
+    Tratamiento,
+    Usuario,
+    Veterinario,
+    VacunaAnimal,
+)
+from .supabase_client import supabase, supabase_storage
 
-def inicio(request):
-    animales = (
-        Animal.objects.select_related("raza")
-        .order_by("id_animal")
-    )
-    especies = (
-        Animal.objects.order_by()
-        .values_list("especie", flat=True)
-        .distinct()
-    )
-    session_user = request.session.get("refugio_usuario", {})
-    supabase_uid = session_user.get("id") if session_user else None
-    es_personal = bool(
-        supabase_uid
-        and Personal.objects.filter(
-            id_usuario__supabase_uid=supabase_uid
-        ).exists()
-    )
-    return render(
-        request,
-        "index.html",
-        {
-            "animales": animales,
-            "especies": especies,
-            "es_personal": es_personal,
-        },
-    )
+logger = logging.getLogger(__name__)
 
 
 def informacion_refugio(request):
@@ -170,6 +179,12 @@ def solicitar_voluntariado(request):
         .order_by("-fecha_solicitud", "-id_solicitud_vol")
         .first()
     )
+    solicitud_usuario = (
+        SolicitudVoluntariado.objects.filter(id_usuario=usuario)
+        .select_related("id_estado")
+        .order_by("-fecha_solicitud", "-id_solicitud_vol")
+        .first()
+    )
     form = SolicitudVoluntariadoForm()
     error = None
     response_status = 200
@@ -225,6 +240,7 @@ def solicitar_voluntariado(request):
             "form": form,
             "error": error,
             "solicitud_pendiente": solicitud_pendiente,
+            "solicitud_usuario": solicitud_usuario,
             "usuario": usuario,
         },
         status=(
@@ -274,102 +290,496 @@ def gestion_solicitudes(request):
         )
 
     es_admin = personal.rol == "admin"
+    puede_gestionar_adopciones = Personal.objects.filter(
+        pk=personal.pk,
+        id_estado__tipo_estado="Personal",
+        id_estado__nombre="Activo",
+    ).exists()
+    saved_filters = request.session.get("gestion_solicitudes_filtros", {})
+    if not isinstance(saved_filters, dict):
+        saved_filters = {}
+    filter_data = (
+        request.POST
+        if request.method == "POST"
+        else request.GET or saved_filters
+    )
+    type_from_action = {
+        "adopcion": "adopcion",
+        "devolucion": "devolucion",
+        "hogar_temporal": "hogar-temporal",
+    }.get(request.POST.get("tipo_solicitud"), "voluntariado")
+    filtro_tipo = filter_data.get("filtro_tipo") or filter_data.get("tipo")
+    if filtro_tipo not in {
+        "voluntariado",
+        "adopcion",
+        "devolucion",
+        "hogar-temporal",
+    }:
+        filtro_tipo = type_from_action if request.method == "POST" else "voluntariado"
+
+    estado_filtro = filter_data.get("filtro_estado") or filter_data.get("estado")
+    if estado_filtro not in {"pendiente", "aprobada", "rechazada", "todas"}:
+        estado_filtro = "pendiente"
+
+    fecha_filter_data = filter_data.copy()
+    if filtro_tipo == "hogar-temporal":
+        if not fecha_filter_data.get("fecha_desde"):
+            fecha_filter_data["fecha_desde"] = filter_data.get(
+                "hogar-fecha_desde", ""
+            )
+        if not fecha_filter_data.get("fecha_hasta"):
+            fecha_filter_data["fecha_hasta"] = filter_data.get(
+                "hogar-fecha_hasta", ""
+            )
     solicitud_form = GestionSolicitudVoluntariadoForm()
     personal_form = AltaPersonalDesdeSolicitudForm()
-    filtro_fecha_form = FiltroFechaSolicitudForm(request.GET or None)
+    respuesta_adopcion_form = RespuestaSolicitudAdopcionForm()
+    respuesta_devolucion_form = RespuestaDevolucionAdopcionForm()
+    filtro_fecha_form = FiltroFechaSolicitudForm(fecha_filter_data or None)
+    respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm()
+    filtro_fecha_hogar_form = FiltroFechaSolicitudForm(
+        filter_data or None,
+        prefix="hogar",
+    )
     error = None
-    if request.method == "POST":
-        solicitud = get_object_or_404(
-            SolicitudVoluntariado.objects.select_related("id_estado", "id_usuario"),
-            pk=request.POST.get("solicitud_id"),
+    filter_action = (
+        request.method == "POST"
+        and request.POST.get("accion_filtro") == "actualizar"
+    )
+    if filter_action and request.POST.get("limpiar_fechas"):
+        fecha_filter_data["fecha_desde"] = ""
+        fecha_filter_data["fecha_hasta"] = ""
+        filtro_fecha_form = FiltroFechaSolicitudForm(fecha_filter_data)
+
+    legacy_filter_url = request.method == "GET" and any(
+        key in request.GET
+        for key in (
+            "tipo",
+            "estado",
+            "fecha_desde",
+            "fecha_hasta",
+            "hogar-fecha_desde",
+            "hogar-fecha_hasta",
         )
-        if Personal.objects.filter(id_usuario=solicitud.id_usuario).exists():
-            error = (
-                "Esta persona ya forma parte del personal. "
-                "La solicitud no puede volver a modificarse."
+    )
+    if legacy_filter_url and filtro_fecha_form.is_valid():
+        _save_solicitudes_filters(
+            request,
+            filtro_tipo,
+            estado_filtro,
+            filtro_fecha_form.cleaned_data["fecha_desde"],
+            filtro_fecha_form.cleaned_data["fecha_hasta"],
+        )
+        return redirect(
+            f"{resolve_url('gestion_solicitudes')}#{filtro_tipo}"
+        )
+
+    if filter_action:
+        if filtro_fecha_form.is_valid():
+            _save_solicitudes_filters(
+                request,
+                filtro_tipo,
+                estado_filtro,
+                filtro_fecha_form.cleaned_data["fecha_desde"],
+                filtro_fecha_form.cleaned_data["fecha_hasta"],
             )
-        elif request.POST.get("action") == "incorporar_personal":
-            if not es_admin:
-                error = "Solo una cuenta admin puede incorporar personal."
-            elif solicitud.id_estado.nombre != "Aprobada":
-                error = (
-                    "La solicitud debe estar aprobada antes de crear "
-                    "el perfil de personal."
-                )
+            return redirect(
+                f"{resolve_url('gestion_solicitudes')}#{filtro_tipo}"
+            )
+    elif request.method == "POST":
+        if request.POST.get("tipo_solicitud") == "hogar_temporal":
+            respuesta_hogar_form = RespuestaSolicitudHogarTemporalForm(request.POST)
+            solicitud_id = request.POST.get("solicitud_hogar_id")
+            if not puede_gestionar_adopciones:
+                error = "Esta sección está disponible para el personal activo del refugio."
+            elif not respuesta_hogar_form.is_valid():
+                error = "Selecciona una acción válida para responder la solicitud."
+            elif not solicitud_id:
+                error = "No se identificó la solicitud que quieres responder."
             else:
-                personal_form = AltaPersonalDesdeSolicitudForm(request.POST)
-                if personal_form.is_valid():
-                    estado_activo = Estado.objects.filter(
-                        tipo_estado="Personal",
-                        nombre="Activo",
-                    ).first()
-                    if estado_activo is None:
-                        error = (
-                            "No se encontró el estado 'Activo' para personal. "
-                            "No se realizó ningún cambio."
-                        )
-                        logger.error(
-                            "Active staff state is missing while incorporating approved application %s",
-                            solicitud.pk,
-                        )
-                    else:
-                        datos_personal = personal_form.cleaned_data
-                        try:
-                            with transaction.atomic():
-                                Personal.objects.create(
-                                    rut_personal=datos_personal["rut_personal"],
-                                    rol=datos_personal["rol"],
-                                    fecha_ingreso=timezone.localdate(),
-                                    telefono_emergencia=datos_personal[
-                                        "telefono_emergencia"
-                                    ],
-                                    direccion=datos_personal["direccion"],
-                                    id_usuario=solicitud.id_usuario,
-                                    id_estado=estado_activo,
-                                    id_solicitud_vol=solicitud,
-                                )
-                        except DatabaseError:
-                            logger.exception(
-                                "Unable to create staff profile from approved application %s by admin %s",
-                                solicitud.pk,
-                                personal.pk,
-                            )
-                            error = (
-                                "No pudimos crear el perfil de personal. "
-                                "Revisa los datos e inténtalo nuevamente."
-                            )
-                        else:
-                            messages.success(
-                                request,
-                                "El perfil de personal se creó correctamente.",
-                            )
-                            return _redirect_to_filtered_solicitudes(request)
-        else:
-            solicitud_form = GestionSolicitudVoluntariadoForm(
-                request.POST,
-                instance=solicitud,
-            )
-            if solicitud_form.is_valid():
-                solicitud_actualizada = solicitud_form.save(commit=False)
-                solicitud_actualizada.fecha_respuesta = (
-                    None
-                    if solicitud_actualizada.id_estado.nombre == "Pendiente"
-                    else timezone.localdate()
-                )
                 try:
-                    solicitud_actualizada.save(
-                        update_fields=("id_estado", "observacion", "fecha_respuesta")
-                    )
+                    with transaction.atomic():
+                        solicitud_hogar = get_object_or_404(
+                            SolicitudHogarTemporal.objects.select_for_update()
+                            .select_related("id_estado"),
+                            pk=solicitud_id,
+                        )
+                        if solicitud_hogar.id_estado.nombre not in {
+                            "Pendiente",
+                            "En Revisión",
+                        }:
+                            error = "Esta solicitud ya fue respondida."
+                        else:
+                            estado_nombre = (
+                                respuesta_hogar_form.cleaned_data["action"]
+                            )
+                            estado_hogar = Estado.objects.filter(
+                                tipo_estado="Solicitud",
+                                nombre=estado_nombre,
+                            ).order_by("id_estado").first()
+                            if estado_hogar is None:
+                                error = (
+                                    "No se encontró el estado para responder la solicitud. "
+                                    "No se realizó ningún cambio."
+                                )
+                                logger.error(
+                                    "Temporary-home request state %s is missing from the database",
+                                    estado_nombre,
+                                )
+                            else:
+                                casa_temporal = get_object_or_404(
+                                    CasaTemporal.objects.select_for_update(),
+                                    pk=solicitud_hogar.id_casa_id,
+                                )
+                                solicitud_hogar.id_estado = estado_hogar
+                                solicitud_hogar.observacion = (
+                                    respuesta_hogar_form.cleaned_data["respuesta"]
+                                    or None
+                                )
+                                solicitud_hogar.fecha_respuesta = timezone.localdate()
+                                solicitud_hogar.rut_personal = personal
+                                solicitud_hogar.save(
+                                    update_fields=(
+                                        "id_estado",
+                                        "observacion",
+                                        "fecha_respuesta",
+                                        "rut_personal",
+                                    )
+                                )
+                                casa_temporal.id_estado = estado_hogar
+                                casa_temporal.save(update_fields=("id_estado",))
                 except DatabaseError:
                     logger.exception(
-                        "Unable to update volunteer application %s by staff %s",
-                        solicitud.pk,
+                        "Unable to respond to temporary-home request %s by staff member %s",
+                        solicitud_id,
                         personal.pk,
                     )
-                    error = "No pudimos actualizar la solicitud. Inténtalo nuevamente."
+                    error = "No pudimos guardar la respuesta. Inténtalo nuevamente."
                 else:
-                    messages.success(request, "La solicitud se actualizó correctamente.")
-                    return _redirect_to_filtered_solicitudes(request)
+                    if error is None:
+                        messages.success(
+                            request,
+                            "La solicitud de hogar temporal fue respondida correctamente.",
+                        )
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="hogar-temporal",
+                        )
+        elif request.POST.get("tipo_solicitud") == "devolucion":
+            respuesta_devolucion_form = RespuestaDevolucionAdopcionForm(
+                request.POST
+            )
+            devolucion_id = request.POST.get("devolucion_id")
+            if not puede_gestionar_adopciones:
+                error = "Esta sección está disponible para el personal activo del refugio."
+            elif not respuesta_devolucion_form.is_valid():
+                error = "Selecciona una acción válida para responder la devolución."
+            elif not devolucion_id:
+                error = "No se identificó la solicitud de devolución que quieres responder."
+            else:
+                try:
+                    with transaction.atomic():
+                        devolucion = get_object_or_404(
+                            DevolucionAdopcion.objects.select_for_update()
+                            .select_related("id_estado"),
+                            pk=devolucion_id,
+                        )
+                        if devolucion.id_estado.nombre != "Registrada":
+                            error = "Esta solicitud de devolución ya fue respondida."
+                        else:
+                            aprobada = (
+                                respuesta_devolucion_form.cleaned_data["action"]
+                                == "aprobada"
+                            )
+                            estado_nombre = "Aprobada" if aprobada else "Rechazada"
+                            estado_devolucion = EstadoAdopcion.objects.filter(
+                                tipo_estado="Devolucion",
+                                nombre=estado_nombre,
+                            ).order_by("id_estado").first()
+                            if estado_devolucion is None:
+                                error = (
+                                    "No se encontró el estado para responder la "
+                                    "devolución. No se realizó ningún cambio."
+                                )
+                                logger.error(
+                                    "Return request state %s is missing from the database",
+                                    estado_nombre,
+                                )
+                            else:
+                                adopcion = Adopcion.objects.select_for_update().get(
+                                    pk=devolucion.id_adopcion_id
+                                )
+                                animal = Animal.objects.select_for_update().get(
+                                    pk=adopcion.id_animal_id
+                                )
+                                if (
+                                    adopcion.fecha_termino is not None
+                                    and adopcion.fecha_termino
+                                    <= timezone.localdate()
+                                ):
+                                    error = (
+                                        "La adopción ya fue finalizada y no se puede "
+                                        "responder esta devolución."
+                                    )
+                                else:
+                                    if aprobada:
+                                        estado_disponible = Estado.objects.filter(
+                                            tipo_estado="Animal",
+                                            nombre="Disponible",
+                                        ).order_by("id_estado").first()
+                                        if estado_disponible is None:
+                                            error = (
+                                                "No se encontró el estado Disponible "
+                                                "para el animal. No se realizó ningún cambio."
+                                            )
+                                            logger.error(
+                                                "Available animal state is missing from the database"
+                                            )
+                                        else:
+                                            adopcion.fecha_termino = timezone.localdate()
+                                            adopcion.save(
+                                                update_fields=("fecha_termino",)
+                                            )
+                                            animal.id_estado = estado_disponible.pk
+                                            animal.save(update_fields=("id_estado",))
+
+                                    if error is None:
+                                        devolucion.id_estado = estado_devolucion
+                                        devolucion.fecha_evaluacion = (
+                                            timezone.localdate()
+                                        )
+                                        devolucion.save(
+                                            update_fields=(
+                                                "id_estado",
+                                                "fecha_evaluacion",
+                                            )
+                                        )
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to respond to return request %s by staff member %s",
+                        devolucion_id,
+                        personal.pk,
+                    )
+                    error = "No pudimos guardar la respuesta. Inténtalo nuevamente."
+                else:
+                    if error is None:
+                        messages.success(
+                            request,
+                            "La solicitud de devolución fue respondida correctamente.",
+                        )
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="devolucion",
+                        )
+        elif request.POST.get("tipo_solicitud") == "adopcion":
+            respuesta_adopcion_form = RespuestaSolicitudAdopcionForm(request.POST)
+            solicitud_id = request.POST.get("solicitud_adopcion_id")
+            if not puede_gestionar_adopciones:
+                error = "Esta sección está disponible para el personal activo del refugio."
+            elif not respuesta_adopcion_form.is_valid():
+                error = "Selecciona una acción válida para responder la solicitud."
+            elif not solicitud_id:
+                error = "No se identificó la solicitud que quieres responder."
+            else:
+                try:
+                    with transaction.atomic():
+                        solicitud_adopcion = get_object_or_404(
+                            SolicitudAdopcion.objects.select_for_update()
+                            .select_related("id_estado"),
+                            pk=solicitud_id,
+                        )
+                        if solicitud_adopcion.id_estado.nombre not in {
+                            "Pendiente",
+                            "En Revisión",
+                        }:
+                            error = "Esta solicitud ya fue respondida."
+                        else:
+                            estado_nombre = (
+                                "Aprobada"
+                                if respuesta_adopcion_form.cleaned_data["action"]
+                                == SolicitudAdopcion.APROBADA
+                                else "Rechazada"
+                            )
+                            estado_adopcion = EstadoAdopcion.objects.filter(
+                                tipo_estado="Solicitud",
+                                nombre=estado_nombre,
+                            ).order_by("id_estado").first()
+                            if estado_adopcion is None:
+                                error = (
+                                    "No se encontró el estado para responder la solicitud. "
+                                    "No se realizó ningún cambio."
+                                )
+                                logger.error(
+                                    "Adoption request state %s is missing from the database",
+                                    estado_nombre,
+                                )
+                            else:
+                                animal = Animal.objects.select_for_update().get(
+                                    pk=solicitud_adopcion.id_animal_id
+                                )
+                                estado_animal_nombre = (
+                                    "Adoptado"
+                                    if estado_nombre == "Aprobada"
+                                    else "Disponible"
+                                )
+                                estado_animal = Estado.objects.filter(
+                                    tipo_estado="Animal",
+                                    nombre=estado_animal_nombre,
+                                ).order_by("id_estado").first()
+                                if estado_animal is None:
+                                    error = (
+                                        f"No se encontró el estado {estado_animal_nombre} "
+                                        "para el animal. No se realizó ningún cambio."
+                                    )
+                                    logger.error(
+                                        "Animal state %s is missing from the database",
+                                        estado_animal_nombre,
+                                    )
+                                else:
+                                    if estado_nombre == "Aprobada":
+                                        Adopcion.objects.create(
+                                            id_animal=solicitud_adopcion.id_animal,
+                                            id_usuario=solicitud_adopcion.id_usuario,
+                                            fecha_inicio=timezone.localdate(),
+                                            fecha_termino=None,
+                                        )
+                                    animal.id_estado = estado_animal.pk
+                                    animal.save(update_fields=("id_estado",))
+                                    solicitud_adopcion.id_estado = estado_adopcion
+                                    solicitud_adopcion.respuesta = (
+                                        respuesta_adopcion_form.cleaned_data["respuesta"]
+                                    )
+                                    solicitud_adopcion.fecha_respuesta = timezone.localdate()
+                                    solicitud_adopcion.respondida_por = personal
+                                    solicitud_adopcion.save(
+                                        update_fields=(
+                                            "id_estado",
+                                            "respuesta",
+                                            "fecha_respuesta",
+                                            "respondida_por",
+                                        )
+                                    )
+                except DatabaseError:
+                    logger.exception(
+                        "Unable to respond to adoption request %s by staff member %s",
+                        solicitud_id,
+                        personal.pk,
+                    )
+                    error = "No pudimos guardar la respuesta. Inténtalo nuevamente."
+                else:
+                    if error is None:
+                        messages.success(
+                            request,
+                            "La solicitud de adopción fue respondida correctamente.",
+                        )
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="adopcion",
+                        )
+        else:
+            solicitud = get_object_or_404(
+                SolicitudVoluntariado.objects.select_related("id_estado", "id_usuario"),
+                pk=request.POST.get("solicitud_id"),
+            )
+            if Personal.objects.filter(id_usuario=solicitud.id_usuario).exists():
+                error = (
+                    "Esta persona ya forma parte del personal. "
+                    "La solicitud no puede volver a modificarse."
+                )
+            elif request.POST.get("action") == "incorporar_personal":
+                if not es_admin:
+                    error = "Solo una cuenta admin puede incorporar personal."
+                elif solicitud.id_estado.nombre != "Aprobada":
+                    error = (
+                        "La solicitud debe estar aprobada antes de crear "
+                        "el perfil de personal."
+                    )
+                else:
+                    personal_form = AltaPersonalDesdeSolicitudForm(request.POST)
+                    if personal_form.is_valid():
+                        estado_activo = Estado.objects.filter(
+                            tipo_estado="Personal",
+                            nombre="Activo",
+                        ).first()
+                        if estado_activo is None:
+                            error = (
+                                "No se encontró el estado 'Activo' para personal. "
+                                "No se realizó ningún cambio."
+                            )
+                            logger.error(
+                                "Active staff state is missing while incorporating approved application %s",
+                                solicitud.pk,
+                            )
+                        else:
+                            datos_personal = personal_form.cleaned_data
+                            try:
+                                with transaction.atomic():
+                                    personal_creado = Personal.objects.create(
+                                        rut_personal=datos_personal["rut_personal"],
+                                        rol=datos_personal["rol"],
+                                        fecha_ingreso=timezone.localdate(),
+                                        telefono_emergencia=datos_personal[
+                                            "telefono_emergencia"
+                                        ],
+                                        direccion=datos_personal["direccion"],
+                                        id_usuario=solicitud.id_usuario,
+                                        id_estado=estado_activo,
+                                        id_solicitud_vol=solicitud,
+                                    )
+                                    if datos_personal["rol"] == "veterinario":
+                                        Veterinario.objects.create(
+                                            rut_personal=personal_creado,
+                                            especialidad=datos_personal["especialidad"],
+                                            experiencia=datos_personal["experiencia"],
+                                        )
+                            except DatabaseError:
+                                logger.exception(
+                                    "Unable to create staff profile from approved application %s by admin %s",
+                                    solicitud.pk,
+                                    personal.pk,
+                                )
+                                error = (
+                                    "No pudimos crear el perfil de personal. "
+                                    "Revisa los datos e inténtalo nuevamente."
+                                )
+                            else:
+                                messages.success(
+                                    request,
+                                    "El perfil de personal se creó correctamente.",
+                                )
+                                return _redirect_to_filtered_solicitudes(
+                                    request,
+                                    anchor="voluntariado",
+                                )
+            else:
+                solicitud_form = GestionSolicitudVoluntariadoForm(
+                    request.POST,
+                    instance=solicitud,
+                )
+                if solicitud_form.is_valid():
+                    solicitud_actualizada = solicitud_form.save(commit=False)
+                    solicitud_actualizada.fecha_respuesta = (
+                        None
+                        if solicitud_actualizada.id_estado.nombre == "Pendiente"
+                        else timezone.localdate()
+                    )
+                    try:
+                        solicitud_actualizada.save(
+                            update_fields=("id_estado", "observacion", "fecha_respuesta")
+                        )
+                    except DatabaseError:
+                        logger.exception(
+                            "Unable to update volunteer application %s by staff %s",
+                            solicitud.pk,
+                            personal.pk,
+                        )
+                        error = "No pudimos actualizar la solicitud. Inténtalo nuevamente."
+                    else:
+                        messages.success(request, "La solicitud se actualizó correctamente.")
+                        return _redirect_to_filtered_solicitudes(
+                            request,
+                            anchor="voluntariado",
+                        )
 
     solicitudes_voluntariado = (
         SolicitudVoluntariado.objects.select_related("id_usuario", "id_estado")
@@ -380,28 +790,138 @@ def gestion_solicitudes(request):
         )
         .order_by("-fecha_solicitud", "-id_solicitud_vol")
     )
+    solicitudes_hogar_temporal = (
+        SolicitudHogarTemporal.objects.select_related(
+            "id_casa",
+            "id_casa__id_usuario",
+            "id_estado",
+            "rut_personal",
+            "rut_personal__id_usuario",
+        )
+        .order_by("-fecha_solicitud", "-id_solicitud_hog")
+    )
+    solicitudes_adopcion = SolicitudAdopcion.objects.filter(
+        id_estado__tipo_estado="Solicitud",
+    ).select_related(
+        "id_animal",
+        "id_usuario",
+        "id_estado",
+        "respondida_por",
+        "respondida_por__id_usuario",
+    )
+    solicitudes_devolucion = (
+        DevolucionAdopcion.objects.filter(id_estado__tipo_estado="Devolucion")
+        .select_related(
+            "id_estado",
+            "id_adopcion",
+            "id_adopcion__id_animal",
+            "id_adopcion__id_usuario",
+        )
+        .order_by("-fecha_devolucion")
+    )
     if filtro_fecha_form.is_valid():
         fecha_desde = filtro_fecha_form.cleaned_data.get("fecha_desde")
         fecha_hasta = filtro_fecha_form.cleaned_data.get("fecha_hasta")
+        queryset_dates = {
+            "voluntariado": (solicitudes_voluntariado, "fecha_solicitud"),
+            "adopcion": (solicitudes_adopcion, "fecha_solicitud"),
+            "devolucion": (solicitudes_devolucion, "fecha_devolucion"),
+            "hogar-temporal": (solicitudes_hogar_temporal, "fecha_solicitud"),
+        }
+        solicitudes_por_tipo, campo_fecha = queryset_dates[filtro_tipo]
         if fecha_desde:
-            solicitudes_voluntariado = solicitudes_voluntariado.filter(
+            solicitudes_por_tipo = solicitudes_por_tipo.filter(
+                **{f"{campo_fecha}__gte": fecha_desde}
+            )
+        if fecha_hasta:
+            solicitudes_por_tipo = solicitudes_por_tipo.filter(
+                **{f"{campo_fecha}__lte": fecha_hasta}
+            )
+        if filtro_tipo == "voluntariado":
+            solicitudes_voluntariado = solicitudes_por_tipo
+        elif filtro_tipo == "adopcion":
+            solicitudes_adopcion = solicitudes_por_tipo
+        elif filtro_tipo == "devolucion":
+            solicitudes_devolucion = solicitudes_por_tipo
+        else:
+            solicitudes_hogar_temporal = solicitudes_por_tipo
+    elif filtro_fecha_form.errors:
+        if filtro_tipo == "voluntariado":
+            solicitudes_voluntariado = solicitudes_voluntariado.none()
+        elif filtro_tipo == "adopcion":
+            solicitudes_adopcion = solicitudes_adopcion.none()
+        elif filtro_tipo == "devolucion":
+            solicitudes_devolucion = solicitudes_devolucion.none()
+        else:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.none()
+    if filtro_fecha_hogar_form.is_valid() and (
+        filter_data.get("hogar-fecha_desde")
+        or filter_data.get("hogar-fecha_hasta")
+    ):
+        fecha_desde = filtro_fecha_hogar_form.cleaned_data.get("fecha_desde")
+        fecha_hasta = filtro_fecha_hogar_form.cleaned_data.get("fecha_hasta")
+        if fecha_desde:
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
                 fecha_solicitud__gte=fecha_desde
             )
         if fecha_hasta:
-            solicitudes_voluntariado = solicitudes_voluntariado.filter(
+            solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
                 fecha_solicitud__lte=fecha_hasta
             )
-    elif filtro_fecha_form.errors:
-        solicitudes_voluntariado = solicitudes_voluntariado.none()
+    elif filtro_fecha_hogar_form.errors and filtro_tipo == "hogar-temporal":
+        solicitudes_hogar_temporal = solicitudes_hogar_temporal.none()
+    estado_por_filtro = {
+        "pendiente": ("Pendiente", "En Revisión", "Registrada"),
+        "aprobada": ("Aprobada",),
+        "rechazada": ("Rechazada",),
+    }
+    estados_solicitud = estado_por_filtro.get(estado_filtro)
+    if estados_solicitud:
+        solicitudes_voluntariado = solicitudes_voluntariado.filter(
+            id_estado__nombre__in=estados_solicitud
+        )
+        solicitudes_adopcion = solicitudes_adopcion.filter(
+            id_estado__nombre__in=estados_solicitud
+        )
+        solicitudes_hogar_temporal = solicitudes_hogar_temporal.filter(
+            id_estado__nombre__in=estados_solicitud
+        )
+        estados_devolucion = (
+            ("Registrada",)
+            if estado_filtro == "pendiente"
+            else estados_solicitud
+        )
+        solicitudes_devolucion = solicitudes_devolucion.filter(
+            id_estado__nombre__in=estados_devolucion
+        )
     return render(
         request,
         "gestion_solicitudes.html",
         {
             "solicitudes_voluntariado": solicitudes_voluntariado,
+            "solicitudes_adopcion": solicitudes_adopcion,
+            "solicitudes_devolucion": solicitudes_devolucion,
+            "solicitudes_hogar_temporal": solicitudes_hogar_temporal,
             "solicitud_form": solicitud_form,
             "personal_form": personal_form,
+            "respuesta_adopcion_form": respuesta_adopcion_form,
+            "respuesta_devolucion_form": respuesta_devolucion_form,
+            "respuesta_hogar_form": respuesta_hogar_form,
+            "puede_ver_solicitudes_adopcion": True,
+            "puede_gestionar_adopciones": puede_gestionar_adopciones,
             "es_admin": es_admin,
             "filtro_fecha_form": filtro_fecha_form,
+            "filtro_fecha_hogar_form": filtro_fecha_hogar_form,
+            "filtro_tipo": filtro_tipo,
+            "estado_filtro": estado_filtro,
+            "fecha_desde_filtro": filtro_fecha_form["fecha_desde"].value() or "",
+            "fecha_hasta_filtro": filtro_fecha_form["fecha_hasta"].value() or "",
+            "estado_filtro_opciones": (
+                ("pendiente", "Pendientes"),
+                ("aprobada", "Aprobadas"),
+                ("rechazada", "Rechazadas"),
+                ("todas", "Todas"),
+            ),
             "error": error,
             "personal": personal,
         },
@@ -413,24 +933,86 @@ def gestion_solicitudes(request):
                 and request.POST.get("action") == "incorporar_personal"
                 and personal_form.errors
             )
+            or (
+                request.method == "POST"
+                and request.POST.get("tipo_solicitud") == "adopcion"
+                and error
+            )
+            or (
+                request.method == "POST"
+                and request.POST.get("tipo_solicitud") == "hogar_temporal"
+                and error
+            )
             or filtro_fecha_form.errors
+            or filtro_fecha_hogar_form.errors
             else 200
         ),
     )
 
 
-def _redirect_to_filtered_solicitudes(request):
-    query_params = {
-        key: value
-        for key, value in {
+def _save_solicitudes_filters(
+    request,
+    tipo_filtro,
+    estado_filtro,
+    fecha_desde,
+    fecha_hasta,
+):
+    request.session["gestion_solicitudes_filtros"] = {
+        "tipo": tipo_filtro,
+        "estado": estado_filtro,
+        "fecha_desde": fecha_desde.isoformat() if fecha_desde else "",
+        "fecha_hasta": fecha_hasta.isoformat() if fecha_hasta else "",
+    }
+
+
+def _redirect_to_filtered_solicitudes(request, anchor=None):
+    tipo_filtro = request.POST.get("filtro_tipo") or {
+        "adopcion": "adopcion",
+        "devolucion": "devolucion",
+        "hogar_temporal": "hogar-temporal",
+    }.get(request.POST.get("tipo_solicitud"), "voluntariado")
+    if tipo_filtro not in {
+        "voluntariado",
+        "adopcion",
+        "devolucion",
+        "hogar-temporal",
+    }:
+        tipo_filtro = "voluntariado"
+    estado_filtro = request.POST.get("filtro_estado", "pendiente")
+    if estado_filtro not in {"pendiente", "aprobada", "rechazada", "todas"}:
+        estado_filtro = "pendiente"
+    filtro_fecha_form = FiltroFechaSolicitudForm(
+        {
             "fecha_desde": request.POST.get("fecha_desde", ""),
             "fecha_hasta": request.POST.get("fecha_hasta", ""),
-        }.items()
-        if value
-    }
+        }
+    )
+    saved_filters = request.session.get("gestion_solicitudes_filtros", {})
+    if filtro_fecha_form.is_valid():
+        fecha_desde = filtro_fecha_form.cleaned_data["fecha_desde"]
+        fecha_hasta = filtro_fecha_form.cleaned_data["fecha_hasta"]
+    else:
+        fecha_desde = saved_filters.get("fecha_desde", "")
+        fecha_hasta = saved_filters.get("fecha_hasta", "")
+        filtro_fecha_form = FiltroFechaSolicitudForm(
+            {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+        )
+        if filtro_fecha_form.is_valid():
+            fecha_desde = filtro_fecha_form.cleaned_data["fecha_desde"]
+            fecha_hasta = filtro_fecha_form.cleaned_data["fecha_hasta"]
+        else:
+            fecha_desde = None
+            fecha_hasta = None
+    _save_solicitudes_filters(
+        request,
+        tipo_filtro,
+        estado_filtro,
+        fecha_desde,
+        fecha_hasta,
+    )
     destination = resolve_url("gestion_solicitudes")
-    if query_params:
-        destination = f"{destination}?{urlencode(query_params)}"
+    if anchor:
+        destination = f"{destination}#{anchor}"
     return redirect(destination)
 
 
@@ -1298,14 +1880,7 @@ def login_usuario(request):
     )
 
     nombre = " ".join(
-        parte
-        for parte in (
-            usuario.p_nombre,
-            usuario.s_nombre,
-            usuario.ap_paterno,
-            usuario.ap_materno,
-        )
-        if parte
+        parte for parte in (usuario.p_nombre, usuario.ap_paterno) if parte
     )
     request.session["refugio_usuario"] = {
         "id": str(usuario.supabase_uid),

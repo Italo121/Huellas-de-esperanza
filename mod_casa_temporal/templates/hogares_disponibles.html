@@ -1,0 +1,74 @@
+{% extends "index.html" %}
+
+{% block content %}
+<main class="container py-4">
+    <header class="text-center mb-4">
+        <div class="brand-icon mb-3" aria-hidden="true">
+            <i class="bi bi-house-check-fill"></i>
+        </div>
+        <h1 class="h3 fw-bold mb-2">Hogares temporales vinculados al refugio</h1>
+        <p class="text-secondary mb-0">
+            Conoce las características generales de los hogares que actualmente
+            están acogiendo animales.
+        </p>
+    </header>
+
+    {% if hogares %}
+    <p class="text-secondary">
+        Actualmente hay {{ hogares|length }} hogar{{ hogares|length|pluralize:"es" }}
+        temporal{{ hogares|length|pluralize:"es" }} trabajando con el refugio.
+    </p>
+    <div class="row g-3">
+        {% for hogar in hogares %}
+        <div class="col-md-6 col-xl-4">
+            <article class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h2 class="h5 fw-bold">
+                        <i class="bi bi-house-heart text-success me-2" aria-hidden="true"></i>
+                        Hogar temporal {{ hogar.numero }}
+                    </h2>
+                    <ul class="list-unstyled mb-0">
+                        <li class="mb-2">
+                            <i class="bi bi-people me-2 text-secondary" aria-hidden="true"></i>
+                            Capacidad declarada: {{ hogar.cant_persona }}
+                            persona{{ hogar.cant_persona|pluralize }}
+                        </li>
+                        <li class="mb-2">
+                            <i class="bi bi-door-open me-2 text-secondary" aria-hidden="true"></i>
+                            {{ hogar.cant_habitacion }} habitación{{ hogar.cant_habitacion|pluralize }}
+                        </li>
+                        <li class="mb-2">
+                            <i class="bi bi-bounding-box me-2 text-secondary" aria-hidden="true"></i>
+                            Espacio declarado: {{ hogar.metro_c }} m²
+                        </li>
+                        <li class="mb-2">
+                            <i class="bi bi-tree me-2 text-secondary" aria-hidden="true"></i>
+                            {% if hogar.patio %}Cuenta con patio{% else %}No cuenta con patio{% endif %}
+                        </li>
+                        <li>
+                            <i class="bi bi-heart-pulse me-2 text-secondary" aria-hidden="true"></i>
+                            {{ hogar.animales_acogidos }} animal{{ hogar.animales_acogidos|pluralize:"es" }}
+                            actualmente acogido{{ hogar.animales_acogidos|pluralize }}
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-footer bg-transparent border-0 pt-0">
+                    <span class="badge text-bg-success">Activo con el refugio</span>
+                </div>
+            </article>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card border-0 bg-light text-center">
+        <div class="card-body py-5">
+            <i class="bi bi-house-exclamation fs-1 text-secondary" aria-hidden="true"></i>
+            <h2 class="h5 fw-bold mt-3">Aún no hay hogares activos para mostrar</h2>
+            <p class="text-secondary mb-0">
+                Cuando un hogar esté acogiendo animales, aparecerá en esta sección.
+            </p>
+        </div>
+    </div>
+    {% endif %}
+</main>
+{% endblock %}

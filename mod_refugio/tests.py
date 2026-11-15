@@ -13,10 +13,16 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.test import RequestFactory, SimpleTestCase
 from django.urls import resolve, reverse
+from django.utils import translation
 from httpx import ReadTimeout
 
+from .context_processors import personal_context
 from . import views
-from .forms import FiltroFechaSolicitudForm
+from .forms import (
+    AltaPersonalDesdeSolicitudForm,
+    FiltroFechaSolicitudForm,
+    RegistroUsuarioForm,
+)
 from .models import (
     Animal,
     EvaluacionAnimal,
@@ -30,9 +36,22 @@ from .models import (
     VacunaAnimal,
     Veterinario,
 )
+from mod_casa_temporal.models import SolicitudHogarTemporal
 
 
 class InformacionRefugioTests(SimpleTestCase):
+    def test_root_url_redirects_to_shelter_information(self):
+        response = resolve("/").func(RequestFactory().get("/"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("informacion_refugio"))
+
+    def test_refuge_home_url_uses_shelter_information_view(self):
+        self.assertIs(
+            resolve("/refugio/").func,
+            views.informacion_refugio,
+        )
+
     def test_previous_refuge_url_redirects_to_information_page(self):
         response = resolve("/refugio/refugio/").func(
             RequestFactory().get("/refugio/refugio/")
@@ -74,6 +93,37 @@ class InformacionRefugioTests(SimpleTestCase):
         self.assertIn("mlat=-36.820000", context["external_map_url"])
         self.assertIn("mlon=-73.040000", context["external_map_url"])
 
+    def test_map_data_coordinates_remain_unlocalized_for_javascript(self):
+        refuge = SimpleNamespace(
+            id_refugio=1,
+            nombre="Refugio Esperanza",
+            direccion="Calle 123",
+            telefono=987654321,
+            correo="contacto@example.cl",
+            latitud=Decimal("-36.820000"),
+            longitud=Decimal("-73.040000"),
+        )
+
+        with translation.override("es"):
+            html = render_to_string(
+                "informacion_refugio.html",
+                {
+                    "refugio": refuge,
+                    "coordenadas_validas": True,
+                    "external_map_url": "https://example.com/map",
+                    "es_personal": False,
+                    "es_admin": False,
+                    "tiene_hogar_temporal": False,
+                },
+            )
+
+        self.assertIn('data-latitude="-36.820000"', html)
+        self.assertIn('data-longitude="-73.040000"', html)
+        self.assertRegex(
+            html,
+            r"Coordenadas:\s*-36\.820000,\s*-73\.040000",
+        )
+
     @patch("mod_refugio.views.render", return_value=HttpResponse("empty"))
     @patch("mod_refugio.views.Refugio.objects.order_by")
     def test_shelter_page_shows_empty_state_when_no_refuge_exists(
@@ -94,17 +144,13 @@ class InformacionRefugioTests(SimpleTestCase):
         self.assertIsNone(context["external_map_url"])
 
 
-class InicioTests(SimpleTestCase):
-    @patch("mod_refugio.views.Personal.objects.filter")
-    @patch("mod_refugio.views.Animal.objects.order_by")
-    @patch("mod_refugio.views.Animal.objects.select_related")
-    @patch("mod_refugio.views.render", return_value=HttpResponse("home"))
-    def test_staff_menu_visibility_uses_database_membership_not_session_role(
+class StaffContextTests(SimpleTestCase):
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_staff_menu_visibility_uses_database_role_not_session_role(
         self,
-        render_mock,
-        animals_select_related,
-        animals_order_by,
         personal_filter,
+        casa_filter,
     ):
         request = RequestFactory().get("/refugio/")
         request.session = {
@@ -113,39 +159,91 @@ class InicioTests(SimpleTestCase):
                 "rol": None,
             }
         }
-        animals_select_related.return_value.order_by.return_value = []
-        animals_order_by.return_value.values_list.return_value.distinct.return_value = []
-        personal_filter.return_value.exists.return_value = True
+        personal_filter.return_value.values_list.return_value = ["cuidador"]
+        casa_filter.return_value.exists.return_value = False
 
-        response = views.inicio(request)
-
-        self.assertEqual(response.status_code, 200)
+        context = personal_context(request)
         personal_filter.assert_called_once_with(
-            id_usuario__supabase_uid="admin-user-uuid"
+            id_usuario__supabase_uid="admin-user-uuid",
         )
-        self.assertTrue(render_mock.call_args.args[2]["es_personal"])
+        self.assertTrue(context["es_personal"])
+        self.assertFalse(context["es_admin"])
+        self.assertFalse(context["tiene_hogar_temporal"])
 
-    @patch("mod_refugio.views.Personal.objects.filter")
-    @patch("mod_refugio.views.Animal.objects.order_by")
-    @patch("mod_refugio.views.Animal.objects.select_related")
-    @patch("mod_refugio.views.render", return_value=HttpResponse("home"))
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
     def test_public_user_does_not_get_staff_menu(
         self,
-        render_mock,
-        animals_select_related,
-        animals_order_by,
         personal_filter,
     ):
         request = RequestFactory().get("/refugio/")
-        request.session = {"refugio_usuario": {"id": "public-user-uuid"}}
-        animals_select_related.return_value.order_by.return_value = []
-        animals_order_by.return_value.values_list.return_value.distinct.return_value = []
-        personal_filter.return_value.exists.return_value = False
+        request.session = {}
 
-        response = views.inicio(request)
+        context = personal_context(request)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(render_mock.call_args.args[2]["es_personal"])
+        personal_filter.assert_not_called()
+        self.assertFalse(context["es_personal"])
+        self.assertFalse(context["es_admin"])
+
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_staff_menu_is_available_in_base_template_on_other_pages(
+        self,
+        personal_filter,
+        casa_filter,
+    ):
+        request = RequestFactory().get("/adopcion/seguimiento/")
+        request.session = {"refugio_usuario": {"id": "staff-user-uuid"}}
+        personal_filter.return_value.values_list.return_value = ["cuidador"]
+        casa_filter.return_value.exists.return_value = False
+
+        html = render_to_string("index.html", request=request)
+
+        self.assertIn("Gestion refugio", html)
+        self.assertNotIn("Estadisticas y reportes", html)
+        self.assertNotIn("/estadisticas/personal/", html)
+        self.assertIn(
+            'href="/adopcion/seguimiento/"',
+            html,
+        )
+
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_admin_menu_shows_statistics_report_links(
+        self,
+        personal_filter,
+        casa_filter,
+    ):
+        request = RequestFactory().get("/refugio/")
+        request.session = {"refugio_usuario": {"id": "admin-user-uuid"}}
+        personal_filter.return_value.values_list.return_value = ["admin"]
+        casa_filter.return_value.exists.return_value = False
+
+        html = render_to_string("index.html", request=request)
+
+        self.assertIn("/estadisticas/", html)
+        self.assertIn("/estadisticas/personal/", html)
+        self.assertIn("/estadisticas/donaciones/", html)
+
+    @patch("mod_refugio.context_processors.CasaTemporal.objects.filter")
+    @patch("mod_refugio.context_processors.Personal.objects.filter")
+    def test_owner_menu_shows_private_home_link_when_user_has_a_home(
+        self,
+        personal_filter,
+        casa_filter,
+    ):
+        request = RequestFactory().get("/refugio/")
+        request.session = {"refugio_usuario": {"id": "home-owner-uuid"}}
+        personal_filter.return_value.values_list.return_value = []
+        casa_filter.return_value.exists.return_value = True
+
+        context = personal_context(request)
+
+        self.assertFalse(context["es_personal"])
+        self.assertFalse(context["es_admin"])
+        self.assertTrue(context["tiene_hogar_temporal"])
+        casa_filter.assert_called_once_with(
+            id_usuario__supabase_uid="home-owner-uuid",
+        )
 
 
 class AccountNavigationTests(SimpleTestCase):
@@ -184,6 +282,20 @@ class AccountNavigationTests(SimpleTestCase):
         self.assertIn("Cerrar sesión", html)
         self.assertIn('action="/refugio/logout/"', html)
         self.assertNotIn("Iniciar sesión", html)
+
+    def test_account_menu_trims_existing_full_session_name(self):
+        request = RequestFactory().get("/refugio/informacion/")
+        request.session = {
+            "refugio_usuario": {
+                "nombre": "Ana María Prueba Apellido",
+                "correo": "ana@example.com",
+            }
+        }
+
+        html = render_to_string("_account_nav.html", request=request)
+
+        self.assertIn("Ana Prueba", html)
+        self.assertNotIn("Ana María Prueba Apellido", html)
 
     @patch("mod_refugio.views.messages.success")
     def test_logout_clears_user_and_redirects_to_home(self, success_message):
@@ -307,6 +419,162 @@ class SolicitudVoluntariadoTests(SimpleTestCase):
 
 
 class GestionSolicitudesTests(SimpleTestCase):
+    def test_selected_request_type_is_filtered_by_status_and_date(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {
+            "refugio_usuario": {"id": "staff-user"},
+            "gestion_solicitudes_filtros": {
+                "tipo": "adopcion",
+                "estado": "rechazada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        }
+        volunteer_queryset = MagicMock()
+        volunteer_queryset.annotate.return_value.order_by.return_value = (
+            volunteer_queryset
+        )
+        home_queryset = MagicMock()
+        home_queryset.select_related.return_value.order_by.return_value = (
+            home_queryset
+        )
+        adoption_queryset = MagicMock()
+        adoption_queryset.select_related.return_value = adoption_queryset
+        adoption_queryset.filter.return_value = adoption_queryset
+        return_queryset = MagicMock()
+        return_queryset.select_related.return_value.order_by.return_value = (
+            return_queryset
+        )
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="staff-rut", rol="cuidador"),
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
+                return_value=volunteer_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudHogarTemporal.objects.select_related",
+                return_value=home_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.filter",
+                return_value=adoption_queryset,
+            ) as adoption_filter,
+            patch(
+                "mod_refugio.views.DevolucionAdopcion.objects.filter",
+                return_value=return_queryset,
+            ),
+            patch(
+                "mod_refugio.views.render",
+                return_value=HttpResponse("requests"),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            render_mock.call_args.args[2]["filtro_tipo"],
+            "adopcion",
+        )
+        self.assertEqual(
+            render_mock.call_args.args[2]["estado_filtro"],
+            "rechazada",
+        )
+        adoption_filter.assert_called_once_with(
+            id_estado__tipo_estado="Solicitud",
+        )
+        adoption_queryset.filter.assert_any_call(
+            fecha_solicitud__gte=date(2026, 10, 1)
+        )
+        adoption_queryset.filter.assert_any_call(
+            fecha_solicitud__lte=date(2026, 10, 31)
+        )
+        adoption_queryset.filter.assert_any_call(
+            id_estado__nombre__in=("Rechazada",)
+        )
+
+    def test_filter_post_redirects_cleanly_and_stores_filters_in_session(self):
+        request = RequestFactory().post(
+            "/refugio/solicitudes/",
+            {
+                "accion_filtro": "actualizar",
+                "filtro_tipo": "adopcion",
+                "filtro_estado": "rechazada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="staff-rut", rol="cuidador"),
+            ),
+            patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.gestion_solicitudes(request)
+
+        parsed_url = urlsplit(response.url)
+        self.assertEqual(parsed_url.path, reverse("gestion_solicitudes"))
+        self.assertEqual(parsed_url.query, "")
+        self.assertEqual(parsed_url.fragment, "adopcion")
+        self.assertEqual(
+            request.session["gestion_solicitudes_filtros"],
+            {
+                "tipo": "adopcion",
+                "estado": "rechazada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+
+    def test_legacy_filter_url_redirects_to_clean_session_url(self):
+        request = RequestFactory().get(
+            "/refugio/solicitudes/",
+            {
+                "tipo": "hogar-temporal",
+                "estado": "aprobada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="staff-rut", rol="cuidador"),
+            ),
+            patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+        ):
+            personal_filter.return_value.exists.return_value = True
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(
+            response.url,
+            f"{reverse('gestion_solicitudes')}#hogar-temporal",
+        )
+        self.assertEqual(
+            request.session["gestion_solicitudes_filtros"],
+            {
+                "tipo": "hogar-temporal",
+                "estado": "aprobada",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+            },
+        )
+
     def test_date_filter_accepts_start_only_end_only_or_period(self):
         test_cases = (
             {"fecha_desde": "2026-10-01"},
@@ -328,16 +596,26 @@ class GestionSolicitudesTests(SimpleTestCase):
         self.assertIn("fecha_hasta", form.errors)
 
     def test_list_view_filters_applications_by_both_dates(self):
-        request = RequestFactory().get(
-            "/refugio/solicitudes/",
-            {"fecha_desde": "2026-10-01", "fecha_hasta": "2026-10-31"},
-        )
-        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {
+            "refugio_usuario": {"id": "staff-user"},
+            "gestion_solicitudes_filtros": {
+                "tipo": "voluntariado",
+                "estado": "pendiente",
+                "fecha_desde": "2026-10-01",
+                "fecha_hasta": "2026-10-31",
+                "hogar-fecha_desde": "2026-10-01",
+                "hogar-fecha_hasta": "2026-10-31",
+            },
+        }
         queryset = MagicMock()
         queryset.order_by.return_value = queryset
         queryset.filter.return_value = queryset
         queryset.none.return_value = queryset
         queryset.annotate.return_value = queryset
+        hogares_queryset = MagicMock()
+        hogares_queryset.order_by.return_value = hogares_queryset
+        hogares_queryset.filter.return_value = hogares_queryset
 
         with (
             patch(
@@ -348,14 +626,22 @@ class GestionSolicitudesTests(SimpleTestCase):
                 ),
             ),
             patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+            patch(
                 "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
                 return_value=queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudHogarTemporal.objects.select_related",
+                return_value=hogares_queryset,
             ),
             patch(
                 "mod_refugio.views.render",
                 return_value=HttpResponse("requests"),
             ),
         ):
+            personal_filter.return_value.exists.return_value = True
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 200)
@@ -365,6 +651,608 @@ class GestionSolicitudesTests(SimpleTestCase):
         queryset.filter.assert_any_call(
             fecha_solicitud__lte=date(2026, 10, 31)
         )
+        hogares_queryset.filter.assert_any_call(
+            fecha_solicitud__gte=date(2026, 10, 1)
+        )
+        hogares_queryset.filter.assert_any_call(
+            fecha_solicitud__lte=date(2026, 10, 31)
+        )
+
+    def test_staff_can_approve_temporary_home_request(self):
+        path = reverse("gestion_solicitudes")
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "hogar_temporal",
+                "solicitud_hogar_id": "27",
+                "action": "Aprobada",
+                "respuesta": "Postulación aprobada.",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        estado_pendiente = SimpleNamespace(nombre="Pendiente")
+        estado_aprobado = SimpleNamespace(nombre="Aprobada")
+        solicitud = SimpleNamespace(
+            id_casa_id=35,
+            id_estado=estado_pendiente,
+            save=MagicMock(),
+        )
+        casa = SimpleNamespace(
+            id_estado=estado_pendiente,
+            save=MagicMock(),
+        )
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudHogarTemporal.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.CasaTemporal.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.Estado.objects.filter"
+            ) as estado_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                side_effect=(solicitud, casa),
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            estado_filter.return_value.order_by.return_value.first.return_value = (
+                estado_aprobado
+            )
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{path}#hogar-temporal",
+        )
+        self.assertIs(solicitud.id_estado, estado_aprobado)
+        self.assertEqual(solicitud.observacion, "Postulación aprobada.")
+        self.assertEqual(solicitud.rut_personal, personal)
+        solicitud.save.assert_called_once_with(
+            update_fields=(
+                "id_estado",
+                "observacion",
+                "fecha_respuesta",
+                "rut_personal",
+            )
+        )
+        self.assertIs(casa.id_estado, estado_aprobado)
+        casa.save.assert_called_once_with(update_fields=("id_estado",))
+
+    def test_adoption_review_uses_shared_staff_management_view(self):
+        path = reverse("gestion_solicitudes")
+        self.assertIs(resolve(path).func, views.gestion_solicitudes)
+
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "adopcion",
+                "solicitud_adopcion_id": "11",
+                "action": "aprobada",
+                "respuesta": "Aprobada",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        solicitud = SimpleNamespace(
+            id_animal_id=7,
+            id_animal=SimpleNamespace(pk=7),
+            id_usuario=SimpleNamespace(pk=3),
+            id_estado=SimpleNamespace(nombre="Pendiente"),
+            save=MagicMock(),
+        )
+        estado_aprobado = SimpleNamespace(nombre="Aprobada")
+        estado_animal_adoptado = SimpleNamespace(pk=37)
+        animal = SimpleNamespace(id_estado=36, save=MagicMock())
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as estado_filter,
+            patch("mod_refugio.views.Estado.objects.filter") as animal_state_filter,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch("mod_refugio.views.Adopcion.objects.create") as adoption_create,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=solicitud,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            estado_filter.return_value.order_by.return_value.first.return_value = (
+                estado_aprobado
+            )
+            animal_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_animal_adoptado
+            )
+            animal_lock.return_value.get.return_value = animal
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{path}#adopcion",
+        )
+        self.assertIs(solicitud.id_estado, estado_aprobado)
+        self.assertEqual(solicitud.respuesta, "Aprobada")
+        self.assertEqual(solicitud.respondida_por, personal)
+        self.assertEqual(animal.id_estado, estado_animal_adoptado.pk)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))
+        adoption_create.assert_called_once_with(
+            id_animal=solicitud.id_animal,
+            id_usuario=solicitud.id_usuario,
+            fecha_inicio=views.timezone.localdate(),
+            fecha_termino=None,
+        )
+        solicitud.save.assert_called_once_with(
+            update_fields=(
+                "id_estado",
+                "respuesta",
+                "fecha_respuesta",
+                "respondida_por",
+            )
+        )
+
+    def test_staff_rejection_returns_animal_to_available_state(self):
+        path = reverse("gestion_solicitudes")
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "adopcion",
+                "solicitud_adopcion_id": "11",
+                "action": "rechazada",
+                "respuesta": "No aprobada.",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        solicitud = SimpleNamespace(
+            id_animal_id=7,
+            id_animal=SimpleNamespace(pk=7),
+            id_usuario=SimpleNamespace(pk=3),
+            id_estado=SimpleNamespace(nombre="Pendiente"),
+            save=MagicMock(),
+        )
+        estado_rechazado = SimpleNamespace(nombre="Rechazada")
+        estado_disponible = SimpleNamespace(pk=12)
+        animal = SimpleNamespace(id_estado=36, save=MagicMock())
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as request_state_filter,
+            patch("mod_refugio.views.Estado.objects.filter") as animal_state_filter,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch("mod_refugio.views.Adopcion.objects.create") as adoption_create,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=solicitud,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            request_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_rechazado
+            )
+            animal_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_disponible
+            )
+            animal_lock.return_value.get.return_value = animal
+
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{path}#adopcion",
+        )
+        self.assertIs(solicitud.id_estado, estado_rechazado)
+        self.assertEqual(animal.id_estado, estado_disponible.pk)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))
+        adoption_create.assert_not_called()
+
+    def test_staff_can_approve_return_and_restore_animal_availability(self):
+        path = reverse("gestion_solicitudes")
+        request = RequestFactory().post(
+            path,
+            {
+                "tipo_solicitud": "devolucion",
+                "devolucion_id": "31",
+                "action": "aprobada",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        devolucion = SimpleNamespace(
+            pk=31,
+            id_estado=SimpleNamespace(nombre="Registrada"),
+            id_adopcion_id=14,
+            save=MagicMock(),
+        )
+        adopcion = SimpleNamespace(
+            id_animal_id=7,
+            fecha_termino=None,
+            save=MagicMock(),
+        )
+        animal = SimpleNamespace(id_estado=37, save=MagicMock())
+        estado_aprobado = SimpleNamespace(nombre="Aprobada")
+        estado_disponible = SimpleNamespace(pk=12)
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.DevolucionAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.Adopcion.objects.select_for_update"
+            ) as adoption_lock,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as return_state_filter,
+            patch("mod_refugio.views.Estado.objects.filter") as animal_state_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=devolucion,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            return_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_aprobado
+            )
+            animal_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_disponible
+            )
+            adoption_lock.return_value.get.return_value = adopcion
+            animal_lock.return_value.get.return_value = animal
+
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{path}#devolucion",
+        )
+        self.assertEqual(adopcion.fecha_termino, views.timezone.localdate())
+        adopcion.save.assert_called_once_with(update_fields=("fecha_termino",))
+        self.assertEqual(animal.id_estado, estado_disponible.pk)
+        animal.save.assert_called_once_with(update_fields=("id_estado",))
+        self.assertIs(devolucion.id_estado, estado_aprobado)
+        self.assertEqual(devolucion.fecha_evaluacion, views.timezone.localdate())
+        devolucion.save.assert_called_once_with(
+            update_fields=("id_estado", "fecha_evaluacion")
+        )
+
+    def test_staff_can_reject_return_without_changing_adoption_or_animal(self):
+        request = RequestFactory().post(
+            reverse("gestion_solicitudes"),
+            {
+                "tipo_solicitud": "devolucion",
+                "devolucion_id": "31",
+                "action": "rechazada",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        personal = SimpleNamespace(pk="12345678-9", rol="cuidador")
+        devolucion = SimpleNamespace(
+            pk=31,
+            id_estado=SimpleNamespace(nombre="Registrada"),
+            id_adopcion_id=14,
+            save=MagicMock(),
+        )
+        adopcion = SimpleNamespace(id_animal_id=7, fecha_termino=None, save=MagicMock())
+        animal = SimpleNamespace(id_estado=37, save=MagicMock())
+        estado_rechazado = SimpleNamespace(nombre="Rechazada")
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=personal,
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.DevolucionAdopcion.objects.select_for_update"
+            ),
+            patch(
+                "mod_refugio.views.Adopcion.objects.select_for_update"
+            ) as adoption_lock,
+            patch(
+                "mod_refugio.views.Animal.objects.select_for_update"
+            ) as animal_lock,
+            patch(
+                "mod_refugio.views.EstadoAdopcion.objects.filter"
+            ) as return_state_filter,
+            patch(
+                "mod_refugio.views.get_object_or_404",
+                return_value=devolucion,
+            ),
+            patch(
+                "mod_refugio.views.transaction.atomic",
+                return_value=nullcontext(),
+            ),
+            patch("mod_refugio.views.messages.success"),
+        ):
+            personal_filter.return_value.exists.return_value = True
+            return_state_filter.return_value.order_by.return_value.first.return_value = (
+                estado_rechazado
+            )
+            adoption_lock.return_value.get.return_value = adopcion
+            animal_lock.return_value.get.return_value = animal
+
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIs(devolucion.id_estado, estado_rechazado)
+        self.assertIsNone(adopcion.fecha_termino)
+        adopcion.save.assert_not_called()
+        self.assertEqual(animal.id_estado, 37)
+        animal.save.assert_not_called()
+
+    def test_inactive_staff_cannot_respond_to_adoption_requests(self):
+        request = RequestFactory().post(
+            "/refugio/solicitudes/",
+            {
+                "tipo_solicitud": "adopcion",
+                "solicitud_adopcion_id": "11",
+                "action": "aprobada",
+                "respuesta": "",
+            },
+        )
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        volunteer_queryset = MagicMock()
+        volunteer_queryset.annotate.return_value = volunteer_queryset
+        volunteer_queryset.order_by.return_value = volunteer_queryset
+        adoption_queryset = MagicMock()
+        adoption_queryset.select_related.return_value = adoption_queryset
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="12345678-9", rol="cuidador"),
+            ),
+            patch(
+                "mod_refugio.views.Personal.objects.filter"
+            ) as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
+                return_value=volunteer_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.filter",
+                return_value=adoption_queryset,
+            ) as adoption_filter,
+            patch("mod_refugio.views.get_object_or_404") as get_object,
+            patch(
+                "mod_refugio.views.render",
+                return_value=HttpResponse("requests", status=400),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 400)
+        get_object.assert_not_called()
+        self.assertIn(
+            "personal activo",
+            render_mock.call_args.args[2]["error"],
+        )
+        adoption_filter.assert_called_once_with(
+            id_estado__tipo_estado="Solicitud",
+        )
+        self.assertTrue(
+            render_mock.call_args.args[2]["puede_ver_solicitudes_adopcion"]
+        )
+        self.assertFalse(
+            render_mock.call_args.args[2]["puede_gestionar_adopciones"]
+        )
+
+    def test_inactive_staff_can_view_adoption_requests(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {"refugio_usuario": {"id": "staff-user"}}
+        volunteer_queryset = MagicMock()
+        volunteer_queryset.annotate.return_value = volunteer_queryset
+        volunteer_queryset.order_by.return_value = volunteer_queryset
+        adoption_queryset = MagicMock()
+        adoption_queryset.select_related.return_value = adoption_queryset
+
+        with (
+            patch(
+                "mod_refugio.views.Personal.objects.get",
+                return_value=SimpleNamespace(pk="12345678-9", rol="cuidador"),
+            ),
+            patch("mod_refugio.views.Personal.objects.filter") as personal_filter,
+            patch(
+                "mod_refugio.views.SolicitudVoluntariado.objects.select_related",
+                return_value=volunteer_queryset,
+            ),
+            patch(
+                "mod_refugio.views.SolicitudAdopcion.objects.filter",
+                return_value=adoption_queryset,
+            ) as adoption_filter,
+            patch(
+                "mod_refugio.views.render",
+                return_value=HttpResponse("requests"),
+            ) as render_mock,
+        ):
+            personal_filter.return_value.exists.return_value = False
+            response = views.gestion_solicitudes(request)
+
+        self.assertEqual(response.status_code, 200)
+        adoption_filter.assert_called_once_with(
+            id_estado__tipo_estado="Solicitud",
+        )
+        adoption_filter.return_value.select_related.return_value.filter.assert_any_call(
+            id_estado__nombre__in=("Pendiente", "En Revisión", "Registrada")
+        )
+        self.assertTrue(
+            render_mock.call_args.args[2]["puede_ver_solicitudes_adopcion"]
+        )
+        self.assertEqual(
+            render_mock.call_args.args[2]["filtro_tipo"],
+            "voluntariado",
+        )
+        self.assertEqual(
+            render_mock.call_args.args[2]["estado_filtro"],
+            "pendiente",
+        )
+        self.assertFalse(
+            render_mock.call_args.args[2]["puede_gestionar_adopciones"]
+        )
+
+    def test_inactive_staff_sees_requests_but_not_response_controls(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {}
+        solicitud = SimpleNamespace(
+            id_animal=SimpleNamespace(nombre="Luna", especie="Perro"),
+            id_usuario=SimpleNamespace(
+                p_nombre="Ana",
+                s_nombre="",
+                ap_paterno="Prueba",
+                ap_materno="",
+                correo="ana@example.com",
+            ),
+            id_estado=SimpleNamespace(nombre="Pendiente"),
+            fecha_solicitud=date(2026, 10, 30),
+            fecha_respuesta=None,
+            motivo="Quiero darle un hogar",
+            observacion="",
+            respuesta="",
+            respondida_por=None,
+            pk=12,
+        )
+
+        html = render_to_string(
+            "gestion_solicitudes.html",
+            {
+                "filtro_tipo": "adopcion",
+                "estado_filtro": "pendiente",
+                "solicitudes_voluntariado": [],
+                "solicitudes_adopcion": [solicitud],
+                "puede_ver_solicitudes_adopcion": True,
+                "puede_gestionar_adopciones": False,
+                "solicitud_form": MagicMock(),
+                "personal_form": MagicMock(),
+                "respuesta_adopcion_form": MagicMock(),
+                "filtro_fecha_form": FiltroFechaSolicitudForm(),
+                "es_admin": False,
+                "error": None,
+            },
+            request=request,
+        )
+
+        self.assertIn("Luna", html)
+        self.assertNotIn("Solicitudes de voluntariado", html)
+        self.assertNotIn("Solicitudes de hogar temporal", html)
+        self.assertIn("Solo el personal activo puede responder esta solicitud.", html)
+        self.assertNotIn('name="tipo_solicitud" value="adopcion"', html)
+
+    def test_staff_can_review_return_requests_from_management_page(self):
+        request = RequestFactory().get("/refugio/solicitudes/")
+        request.session = {}
+        devolucion = SimpleNamespace(
+            pk=31,
+            id_estado=SimpleNamespace(nombre="Registrada"),
+            fecha_devolucion=date(2026, 10, 30),
+            fecha_evaluacion=None,
+            motivo="Cambio de domicilio",
+            condicion_animal="sano",
+            observacion="",
+            requiere_tratamiento=False,
+            id_adopcion=SimpleNamespace(
+                id_animal=SimpleNamespace(nombre="Luna", especie="perro"),
+                id_usuario=SimpleNamespace(
+                    p_nombre="Ana",
+                    s_nombre="",
+                    ap_paterno="Prueba",
+                    ap_materno="",
+                    correo="ana@example.com",
+                ),
+            ),
+        )
+
+        html = render_to_string(
+            "gestion_solicitudes.html",
+            {
+                "filtro_tipo": "devolucion",
+                "estado_filtro": "pendiente",
+                "solicitudes_voluntariado": [],
+                "solicitudes_adopcion": [],
+                "solicitudes_devolucion": [devolucion],
+                "solicitudes_hogar_temporal": [],
+                "puede_ver_solicitudes_adopcion": True,
+                "puede_gestionar_adopciones": True,
+                "solicitud_form": MagicMock(),
+                "personal_form": MagicMock(),
+                "respuesta_adopcion_form": MagicMock(),
+                "respuesta_devolucion_form": MagicMock(),
+                "respuesta_hogar_form": MagicMock(),
+                "filtro_fecha_form": FiltroFechaSolicitudForm(),
+                "filtro_fecha_hogar_form": FiltroFechaSolicitudForm(),
+                "es_admin": False,
+                "error": None,
+            },
+            request=request,
+        )
+
+        self.assertIn("Solicitudes de devolución", html)
+        self.assertIn("Luna", html)
+        self.assertIn('name="tipo_solicitud" value="devolucion"', html)
+        self.assertIn('name="devolucion_id" value="31"', html)
+        self.assertIn('value="aprobada"', html)
+        self.assertIn('value="rechazada"', html)
 
     def test_anonymous_user_is_redirected_to_login(self):
         request = RequestFactory().get("/refugio/solicitudes/")
@@ -447,14 +1335,17 @@ class GestionSolicitudesTests(SimpleTestCase):
             response = views.gestion_solicitudes(request)
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("gestion_solicitudes"))
+        self.assertEqual(
+            response.url,
+            f"{reverse('gestion_solicitudes')}#voluntariado",
+        )
         self.assertEqual(updated_application.fecha_respuesta, date(2026, 10, 28))
         updated_application.save.assert_called_once_with(
             update_fields=("id_estado", "observacion", "fecha_respuesta")
         )
         success_message.assert_called_once()
 
-    def test_admin_can_create_personal_profile_for_approved_application(self):
+    def test_admin_can_create_veterinarian_profile_for_approved_application(self):
         admin = SimpleNamespace(pk="11111111-1", rol="admin")
         usuario = SimpleNamespace(pk=7)
         solicitud = SimpleNamespace(
@@ -466,7 +1357,9 @@ class GestionSolicitudesTests(SimpleTestCase):
         personal_form.is_valid.return_value = True
         personal_form.cleaned_data = {
             "rut_personal": "12345678-9",
-            "rol": "cuidador",
+            "rol": "veterinario",
+            "especialidad": "Animales menores",
+            "experiencia": 5,
             "telefono_emergencia": 987654321,
             "direccion": "Calle de prueba 123",
         }
@@ -476,7 +1369,9 @@ class GestionSolicitudesTests(SimpleTestCase):
                 "action": "incorporar_personal",
                 "solicitud_id": "11",
                 "rut_personal": "12345678-9",
-                "rol": "cuidador",
+                "rol": "veterinario",
+                "especialidad": "Animales menores",
+                "experiencia": "5",
                 "telefono_emergencia": "987654321",
                 "direccion": "Calle de prueba 123",
             },
@@ -506,6 +1401,9 @@ class GestionSolicitudesTests(SimpleTestCase):
                 "mod_refugio.views.Personal.objects.create"
             ) as personal_create,
             patch(
+                "mod_refugio.views.Veterinario.objects.create"
+            ) as veterinarian_create,
+            patch(
                 "mod_refugio.views.SolicitudVoluntariado.objects.select_related"
             ),
             patch("mod_refugio.views.transaction.atomic", return_value=nullcontext()),
@@ -518,18 +1416,24 @@ class GestionSolicitudesTests(SimpleTestCase):
             personal_filter.return_value.exists.return_value = False
             estado_activo = SimpleNamespace(pk=20)
             estado_filter.return_value.first.return_value = estado_activo
+            personal_creado = SimpleNamespace(pk="12345678-9")
+            personal_create.return_value = personal_creado
             response = views.gestion_solicitudes(request)
-        self.assertEqual(response.status_code, 302)
         self.assertEqual(response.status_code, 302)
         personal_create.assert_called_once_with(
             rut_personal="12345678-9",
-            rol="cuidador",
+            rol="veterinario",
             fecha_ingreso=date(2026, 10, 28),
             telefono_emergencia=987654321,
             direccion="Calle de prueba 123",
             id_usuario=usuario,
             id_estado=estado_activo,
             id_solicitud_vol=solicitud,
+        )
+        veterinarian_create.assert_called_once_with(
+            rut_personal=personal_creado,
+            especialidad="Animales menores",
+            experiencia=5,
         )
 
     def test_non_admin_can_approve_volunteer_application_without_creating_personal(self):
@@ -1063,6 +1967,66 @@ class RegistroUsuarioTests(SimpleTestCase):
             },
         )
 
+    def test_registration_accepts_latin_names_and_spaces(self):
+        data = {
+            "p_nombre": "José",
+            "s_nombre": "María José",
+            "ap_paterno": "Muñoz",
+            "ap_materno": "De la Cruz",
+            "correo": "jose@example.com",
+            "genero": "masculino",
+            "fecha_nacimiento": "1990-01-02",
+            "telefono": "",
+            "password": "password123",
+            "password_confirmation": "password123",
+        }
+
+        form = RegistroUsuarioForm(data=data)
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_registration_rejects_numbers_symbols_and_short_names(self):
+        for field_name, invalid_name in (
+            ("p_nombre", "A1"),
+            ("ap_paterno", "Pérez@"),
+            ("s_nombre", "O'Connor"),
+            ("ap_paterno", "A"),
+        ):
+            with self.subTest(field=field_name, value=invalid_name):
+                data = self.request.POST.copy()
+                data[field_name] = invalid_name
+
+                form = RegistroUsuarioForm(data=data)
+
+                self.assertFalse(form.is_valid())
+                self.assertIn(field_name, form.errors)
+
+    def test_registration_rejects_names_longer_than_50_characters(self):
+        data = self.request.POST.copy()
+        data["p_nombre"] = "A" * 51
+
+        form = RegistroUsuarioForm(data=data)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("p_nombre", form.errors)
+
+    def test_registration_rejects_emails_without_valid_domains(self):
+        for email in ("ana@dominio", "ana@-example.com", "ana@example.c"):
+            with self.subTest(email=email):
+                data = self.request.POST.copy()
+                data["correo"] = email
+
+                form = RegistroUsuarioForm(data=data)
+
+                self.assertFalse(form.is_valid())
+                self.assertIn("correo", form.errors)
+
+    def test_phone_field_shows_nine_digit_example(self):
+        self.assertEqual(
+            RegistroUsuarioForm().fields["telefono"].widget.attrs["placeholder"],
+            "921875946",
+        )
+
     @patch("mod_refugio.views.supabase")
     @patch("mod_refugio.views.Usuario.objects.filter")
     def test_existing_local_email_does_not_create_supabase_account(
@@ -1199,6 +2163,79 @@ class RegistroUsuarioTests(SimpleTestCase):
         )
 
 
+class AltaPersonalDesdeSolicitudFormTests(SimpleTestCase):
+    def get_form(self, rut, **extra_data):
+        data = {
+            "rut_personal": rut,
+            "rol": "cuidador",
+            "telefono_emergencia": "987654321",
+            "direccion": "Calle de prueba 123",
+        }
+        data.update(extra_data)
+        return AltaPersonalDesdeSolicitudForm(
+            data=data
+        )
+
+    def test_rut_accepts_formatted_and_unformatted_values(self):
+        for rut in ("12.345.678-5", "123456785"):
+            with self.subTest(rut=rut):
+                form = self.get_form(rut)
+
+                self.assertTrue(form.is_valid(), form.errors)
+                self.assertEqual(form.cleaned_data["rut_personal"], "12345678-5")
+
+    def test_rut_accepts_k_verifier_case_insensitively(self):
+        form = self.get_form("1.000.005-k")
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["rut_personal"], "1000005-K")
+
+    def test_rut_rejects_invalid_verifier_and_format(self):
+        for rut in ("12.345.678-9", "1234567X5", "1.234.567-8"):
+            with self.subTest(rut=rut):
+                form = self.get_form(rut)
+
+                self.assertFalse(form.is_valid())
+                self.assertIn("rut_personal", form.errors)
+
+    def test_veterinarian_role_requires_specialty_and_experience(self):
+        form = self.get_form("12.345.678-5", rol="veterinario")
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("especialidad", form.errors)
+        self.assertIn("experiencia", form.errors)
+
+    def test_veterinarian_role_accepts_zero_years_experience(self):
+        form = self.get_form(
+            "12.345.678-5",
+            rol="veterinario",
+            especialidad="Animales menores",
+            experiencia="0",
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["experiencia"], 0)
+
+    def test_veterinarian_experience_must_fit_nonnegative_smallint_range(self):
+        for years in ("-1", "32768"):
+            with self.subTest(years=years):
+                form = self.get_form(
+                    "12.345.678-5",
+                    rol="veterinario",
+                    especialidad="Animales menores",
+                    experiencia=years,
+                )
+
+                self.assertFalse(form.is_valid())
+                self.assertIn("experiencia", form.errors)
+
+    def test_non_veterinarian_role_does_not_require_veterinary_details(self):
+        form = self.get_form("12.345.678-5", rol="cuidador")
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["experiencia"], None)
+
+
 class LoginUsuarioTests(SimpleTestCase):
     @patch("mod_refugio.views.supabase")
     @patch("mod_refugio.views.Usuario.objects.filter")
@@ -1231,9 +2268,9 @@ class LoginUsuarioTests(SimpleTestCase):
                 pk=1,
                 supabase_uid=auth_user_id,
                 p_nombre="Ana",
-                s_nombre="",
+                s_nombre="María",
                 ap_paterno="Prueba",
-                ap_materno="",
+                ap_materno="Apellido",
                 correo="ana@example.com",
             ),
         ]
@@ -1254,6 +2291,7 @@ class LoginUsuarioTests(SimpleTestCase):
         )
         self.assertEqual(pending_user.supabase_uid, auth_user_id)
         self.assertEqual(request.session["refugio_usuario"]["id"], auth_user_id)
+        self.assertEqual(request.session["refugio_usuario"]["nombre"], "Ana Prueba")
         self.assertEqual(
             request.session["supabase_access_token"],
             "access-token",
@@ -1285,6 +2323,14 @@ class RegistroAnimalTests(SimpleTestCase):
                 "estado_rescate",
             ],
         )
+
+    def test_hamster_is_available_when_registering_and_editing_animals(self):
+        for form in (
+            views.RegistroAnimalForm,
+            views.EditarAnimalForm,
+        ):
+            choices = dict(form.base_fields["especie"].choices)
+            self.assertEqual(choices["hamster"], "Hámster")
 
     def test_state_selectors_are_filtered_by_entity_type(self):
         animal_query_params = (

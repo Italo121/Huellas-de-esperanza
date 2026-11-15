@@ -1,0 +1,790 @@
+{% extends "index.html" %}
+
+{% block content %}
+    <style>
+        .requests-page {
+            max-width: 1100px;
+        }
+
+        .request-type-nav .nav-link {
+            border: 1px solid var(--bs-border-color);
+            color: var(--bs-success-text-emphasis);
+            background: var(--bs-white);
+        }
+
+        .request-type-nav .nav-link.active {
+            color: var(--bs-white);
+            background: var(--bs-success);
+            border-color: var(--bs-success);
+        }
+
+        .request-filter {
+            background: var(--bs-light);
+        }
+
+        .request-card,
+        .request-entry {
+            background: var(--bs-white);
+            border: 1px solid #e5ece7;
+            border-radius: 1rem;
+            box-shadow: 0 .25rem .9rem rgba(20, 55, 35, .05);
+        }
+
+        .request-entry h3 {
+            overflow-wrap: anywhere;
+        }
+    </style>
+    <main class="requests-page mx-auto">
+
+        <header class="mb-4">
+            <h1 class="h2 fw-bold mt-3 mb-1">Gestión de solicitudes</h1>
+            <p class="text-secondary mb-0">
+                Revisa y responde las solicitudes recibidas por el refugio.
+            </p>
+        </header>
+
+        {% for message in messages %}
+        <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'info' %}alert-info{% elif message.tags == 'warning' %}alert-warning{% else %}alert-success{% endif %}"
+             role="status">{{ message }}</div>
+        {% endfor %}
+
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="{% url 'gestion_solicitudes' %}"
+              class="mb-4">
+            {% csrf_token %}
+            <input type="hidden" name="accion_filtro" value="actualizar">
+            <input type="hidden" name="tipo" value="{{ filtro_tipo }}">
+            <nav class="request-card p-3 mb-3"
+                 aria-label="Tipos de solicitudes">
+                <p class="fw-semibold mb-2">Selecciona el tipo de solicitud</p>
+                <div class="nav nav-pills request-type-nav flex-wrap gap-2">
+                    <button class="nav-link {% if filtro_tipo == 'voluntariado' %}active{% endif %}"
+                            type="submit" name="filtro_tipo" value="voluntariado"
+                            {% if filtro_tipo == "voluntariado" %}aria-pressed="true"{% endif %}>
+                        <i class="bi bi-person-hearts me-1" aria-hidden="true"></i>
+                        Voluntariado
+                    </button>
+                    <button class="nav-link {% if filtro_tipo == 'adopcion' %}active{% endif %}"
+                            type="submit" name="filtro_tipo" value="adopcion"
+                            {% if filtro_tipo == "adopcion" %}aria-pressed="true"{% endif %}>
+                        <i class="bi bi-house-heart me-1" aria-hidden="true"></i>
+                        Adopción
+                    </button>
+                    <button class="nav-link {% if filtro_tipo == 'devolucion' %}active{% endif %}"
+                            type="submit" name="filtro_tipo" value="devolucion"
+                            {% if filtro_tipo == "devolucion" %}aria-pressed="true"{% endif %}>
+                        <i class="bi bi-arrow-return-left me-1" aria-hidden="true"></i>
+                        Devolución
+                    </button>
+                    <button class="nav-link {% if filtro_tipo == 'hogar-temporal' %}active{% endif %}"
+                            type="submit" name="filtro_tipo" value="hogar-temporal"
+                            {% if filtro_tipo == "hogar-temporal" %}aria-pressed="true"{% endif %}>
+                        <i class="bi bi-house-door me-1" aria-hidden="true"></i>
+                        Hogar temporal
+                    </button>
+                </div>
+            </nav>
+
+            <div class="request-filter border rounded-3 p-3 p-md-4">
+                <div class="row g-3 align-items-end">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label fw-semibold" for="filtro-estado">
+                            Estado
+                        </label>
+                        <select class="form-select" id="filtro-estado"
+                                name="filtro_estado">
+                            {% for valor, etiqueta in estado_filtro_opciones %}
+                            <option value="{{ valor }}"
+                                    {% if estado_filtro == valor %}selected{% endif %}>
+                                {{ etiqueta }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% for field in filtro_fecha_form %}
+                    <div class="col-12 col-md-3">
+                        <label class="form-label fw-semibold"
+                               for="{{ field.id_for_label }}">
+                            {{ field.label }}
+                        </label>
+                        {{ field }}
+                        {% if field.errors %}
+                        <div class="small text-danger mt-1">
+                            {{ field.errors|join:", " }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button class="btn btn-success" type="submit">
+                            <i class="bi bi-funnel me-1" aria-hidden="true"></i>
+                            Aplicar filtros
+                        </button>
+                        <button class="btn btn-outline-secondary" type="submit"
+                                name="limpiar_fechas" value="1">
+                            Limpiar fechas
+                        </button>
+                    </div>
+                </div>
+                <p class="small text-secondary mb-0 mt-3">
+                    Las fechas filtran por recepción de la solicitud. Puedes completar
+                    solo “Desde”, solo “Hasta” o ambas.
+                </p>
+            </div>
+        </form>
+
+        {% if filtro_tipo == "voluntariado" %}
+        <section id="voluntariado" class="request-card p-3 p-md-4 mb-4"
+                 aria-labelledby="volunteer-heading">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-person-hearts"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="volunteer-heading">
+                        Solicitudes de voluntariado
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Administra el estado y la respuesta a cada postulación.
+                    </p>
+                </div>
+            </div>
+
+            {% if solicitudes_voluntariado %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_voluntariado %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_usuario.p_nombre }}
+                                {{ solicitud.id_usuario.s_nombre }}
+                                {{ solicitud.id_usuario.ap_paterno }}
+                                {{ solicitud.id_usuario.ap_materno }}
+                            </h3>
+                            <span class="text-secondary">{{ solicitud.id_usuario.correo }}</span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge {% if solicitud.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud.id_estado.nombre == 'Rechazada' %}text-bg-danger{% elif solicitud.id_estado.nombre == 'Pendiente' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_solicitud|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_respuesta %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_respuesta|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivación</dt>
+                        <dd class="col-md-9">{{ solicitud.motivacion|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Disponibilidad</dt>
+                        <dd class="col-md-9">{{ solicitud.disponibilidad|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Experiencia</dt>
+                        <dd class="col-md-9">{{ solicitud.experiencia|linebreaksbr }}</dd>
+                    </dl>
+
+                    {% if solicitud.ya_es_personal %}
+                    <div class="alert alert-secondary mb-0" role="status">
+                        Esta persona ya forma parte del personal. La solicitud está
+                        bloqueada y no puede modificarse ni volver a incorporarse.
+                    </div>
+                    {% else %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}#voluntariado">
+                        {% csrf_token %}
+                        <input type="hidden" name="solicitud_id"
+                               value="{{ solicitud.id_solicitud_vol }}">
+                        <input type="hidden" name="filtro_tipo" value="{{ filtro_tipo }}">
+                        <input type="hidden" name="filtro_estado" value="{{ estado_filtro }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ filtro_fecha_form.fecha_desde.value|default:'' }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ filtro_fecha_form.fecha_hasta.value|default:'' }}">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-5">
+                                <label class="form-label fw-semibold"
+                                       for="estado-{{ solicitud.id_solicitud_vol }}">
+                                    Estado de la solicitud
+                                </label>
+                                <select class="form-select"
+                                        id="estado-{{ solicitud.id_solicitud_vol }}"
+                                        name="id_estado" required>
+                                    {% for estado in solicitud_form.fields.id_estado.queryset %}
+                                    <option value="{{ estado.pk }}"
+                                            {% if estado.pk == solicitud.id_estado_id %}selected{% endif %}>
+                                        {{ estado.nombre }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-7">
+                                <label class="form-label fw-semibold"
+                                       for="observacion-{{ solicitud.id_solicitud_vol }}">
+                                    Observación para la persona solicitante
+                                </label>
+                                <textarea class="form-control"
+                                          id="observacion-{{ solicitud.id_solicitud_vol }}"
+                                          name="observacion" rows="2">{{ solicitud.observacion|default_if_none:"" }}</textarea>
+                            </div>
+                            <div class="col-12 text-md-end">
+                                <button class="btn btn-success" type="submit">
+                                    <i class="bi bi-save me-1" aria-hidden="true"></i>
+                                    Guardar estado y respuesta
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    {% if es_admin and solicitud.id_estado.nombre == "Aprobada" %}
+                    <form method="post" class="border-top mt-3 pt-3"
+                          data-staff-form
+                          action="{% url 'gestion_solicitudes' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="incorporar_personal">
+                        <input type="hidden" name="solicitud_id"
+                               value="{{ solicitud.id_solicitud_vol }}">
+                        <input type="hidden" name="filtro_tipo" value="{{ filtro_tipo }}">
+                        <input type="hidden" name="filtro_estado" value="{{ estado_filtro }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ filtro_fecha_form.fecha_desde.value|default:'' }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ filtro_fecha_form.fecha_hasta.value|default:'' }}">
+                        <h4 class="h6 fw-bold mb-1">Incorporar a personal</h4>
+                        <p class="small text-secondary mb-3">
+                            Completa los datos restantes. La fecha de ingreso y el estado
+                            “Activo” se asignarán automáticamente.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="rut-personal-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.rut_personal.label }}
+                                </label>
+                                <input class="form-control" type="text" name="rut_personal"
+                                       id="rut-personal-{{ solicitud.id_solicitud_vol }}"
+                                       maxlength="10" required
+                                       value="{{ personal_form.rut_personal.value|default:'' }}">
+                                {% if personal_form.rut_personal.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.rut_personal.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="rol-personal-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.rol.label }}
+                                </label>
+                                <select class="form-select" name="rol"
+                                        id="rol-personal-{{ solicitud.id_solicitud_vol }}"
+                                        data-staff-role
+                                        aria-controls="datos-veterinario-{{ solicitud.id_solicitud_vol }}"
+                                        required>
+                                    <option value="">Selecciona un rol</option>
+                                    {% for value, label in personal_form.fields.rol.choices %}
+                                    <option value="{{ value }}"
+                                            {% if personal_form.rol.value == value %}selected{% endif %}>
+                                        {{ label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                {% if personal_form.rol.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.rol.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-12" id="datos-veterinario-{{ solicitud.id_solicitud_vol }}"
+                                 data-veterinarian-fields hidden>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label"
+                                               for="especialidad-veterinaria-{{ solicitud.id_solicitud_vol }}">
+                                            {{ personal_form.especialidad.label }}
+                                        </label>
+                                        <input class="form-control" type="text"
+                                               name="especialidad"
+                                               id="especialidad-veterinaria-{{ solicitud.id_solicitud_vol }}"
+                                               value="{{ personal_form.especialidad.value|default:'' }}">
+                                        {% if personal_form.especialidad.errors %}
+                                        <div class="small text-danger mt-1">
+                                            {{ personal_form.especialidad.errors|join:", " }}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label"
+                                               for="experiencia-veterinario-{{ solicitud.id_solicitud_vol }}">
+                                            {{ personal_form.experiencia.label }}
+                                        </label>
+                                        <input class="form-control" type="number"
+                                               name="experiencia"
+                                               id="experiencia-veterinario-{{ solicitud.id_solicitud_vol }}"
+                                               min="0" max="32767"
+                                               value="{{ personal_form.experiencia.value|default:'' }}">
+                                        {% if personal_form.experiencia.errors %}
+                                        <div class="small text-danger mt-1">
+                                            {{ personal_form.experiencia.errors|join:", " }}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="telefono-emergencia-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.telefono_emergencia.label }}
+                                </label>
+                                <input class="form-control" type="number"
+                                       name="telefono_emergencia"
+                                       id="telefono-emergencia-{{ solicitud.id_solicitud_vol }}"
+                                       min="0" required
+                                       value="{{ personal_form.telefono_emergencia.value|default:'' }}">
+                                {% if personal_form.telefono_emergencia.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.telefono_emergencia.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"
+                                       for="direccion-personal-{{ solicitud.id_solicitud_vol }}">
+                                    {{ personal_form.direccion.label }}
+                                </label>
+                                <textarea class="form-control" name="direccion"
+                                          id="direccion-personal-{{ solicitud.id_solicitud_vol }}"
+                                          rows="2" required>{{ personal_form.direccion.value|default:'' }}</textarea>
+                                {% if personal_form.direccion.errors %}
+                                <div class="small text-danger mt-1">
+                                    {{ personal_form.direccion.errors|join:", " }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="col-12 text-md-end">
+                                <button class="btn btn-primary" type="submit">
+                                    <i class="bi bi-person-check me-1" aria-hidden="true"></i>
+                                    Crear perfil de personal
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                No hay solicitudes de voluntariado para los filtros seleccionados.
+            </p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        {% if filtro_tipo == "adopcion" %}
+        <section id="adopcion" class="request-card p-3 p-md-4 mb-4"
+                 aria-labelledby="adoption-heading">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-house-heart"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="adoption-heading">
+                        Solicitudes de adopción
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Revisa y responde las postulaciones de adopción.
+                    </p>
+                </div>
+            </div>
+
+            {% if not puede_ver_solicitudes_adopcion %}
+            <p class="text-secondary mb-0">
+                Las solicitudes de adopción están disponibles para el personal del refugio.
+            </p>
+            {% elif solicitudes_adopcion %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_adopcion %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_animal.nombre|default:solicitud.id_animal.especie }}
+                            </h3>
+                            <span class="text-secondary">
+                                {{ solicitud.id_usuario.p_nombre }}
+                                {{ solicitud.id_usuario.s_nombre }}
+                                {{ solicitud.id_usuario.ap_paterno }}
+                                {{ solicitud.id_usuario.ap_materno }}
+                                {% if solicitud.id_usuario.correo %}
+                                · {{ solicitud.id_usuario.correo }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge {% if solicitud.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud.id_estado.nombre == 'Rechazada' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_solicitud|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_respuesta %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_respuesta|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivo</dt>
+                        <dd class="col-md-9">{{ solicitud.motivo|linebreaksbr }}</dd>
+                        {% if solicitud.observacion %}
+                        <dt class="col-md-3">Información adicional</dt>
+                        <dd class="col-md-9">{{ solicitud.observacion|linebreaksbr }}</dd>
+                        {% endif %}
+                        {% if solicitud.respuesta %}
+                        <dt class="col-md-3">Respuesta</dt>
+                        <dd class="col-md-9">{{ solicitud.respuesta|linebreaksbr }}</dd>
+                        {% endif %}
+                    </dl>
+
+                    {% if solicitud.id_estado.nombre == "Pendiente" or solicitud.id_estado.nombre == "En Revisión" %}
+                    {% if puede_gestionar_adopciones %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}#adopcion">
+                        {% csrf_token %}
+                        <input type="hidden" name="tipo_solicitud" value="adopcion">
+                        <input type="hidden" name="filtro_tipo" value="{{ filtro_tipo }}">
+                        <input type="hidden" name="filtro_estado" value="{{ estado_filtro }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ fecha_desde_filtro }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ fecha_hasta_filtro }}">
+                        <input type="hidden" name="solicitud_adopcion_id"
+                               value="{{ solicitud.pk }}">
+                        <div class="mb-3">
+                            <label class="form-label"
+                                   for="respuesta-adopcion-{{ solicitud.pk }}">
+                                Respuesta para la persona solicitante
+                            </label>
+                            <textarea class="form-control"
+                                      name="respuesta"
+                                      id="respuesta-adopcion-{{ solicitud.pk }}"
+                                      rows="2"
+                                      placeholder="Respuesta opcional"></textarea>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 justify-content-end">
+                            <button class="btn btn-outline-danger" type="submit"
+                                    name="action" value="rechazada">
+                                <i class="bi bi-x-circle me-1" aria-hidden="true"></i>
+                                Rechazar
+                            </button>
+                            <button class="btn btn-success" type="submit"
+                                    name="action" value="aprobada">
+                                <i class="bi bi-check-circle me-1" aria-hidden="true"></i>
+                                Aprobar
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo el personal activo puede responder esta solicitud.
+                    </p>
+                    {% endif %}
+                    {% elif solicitud.respondida_por %}
+                    <div class="small text-secondary border-top pt-3">
+                        Respondida por
+                        {{ solicitud.respondida_por.id_usuario.p_nombre }}
+                        {{ solicitud.respondida_por.id_usuario.ap_paterno }}
+                    </div>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                No hay solicitudes de adopción para los filtros seleccionados.
+            </p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        {% if filtro_tipo == "devolucion" %}
+        <section id="devolucion" class="request-card p-3 p-md-4 mb-4"
+                 aria-labelledby="return-heading">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-arrow-return-left"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="return-heading">
+                        Solicitudes de devolución
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Al aprobar una devolución, la adopción finaliza y el animal vuelve a estar disponible.
+                    </p>
+                </div>
+            </div>
+
+            {% if solicitudes_devolucion %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_devolucion %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_adopcion.id_animal.nombre|default:solicitud.id_adopcion.id_animal.especie }}
+                            </h3>
+                            <span class="text-secondary">
+                                {{ solicitud.id_adopcion.id_usuario.p_nombre }}
+                                {{ solicitud.id_adopcion.id_usuario.s_nombre }}
+                                {{ solicitud.id_adopcion.id_usuario.ap_paterno }}
+                                {{ solicitud.id_adopcion.id_usuario.ap_materno }}
+                                {% if solicitud.id_adopcion.id_usuario.correo %}
+                                · {{ solicitud.id_adopcion.id_usuario.correo }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge {% if solicitud.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud.id_estado.nombre == 'Rechazada' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_devolucion|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_evaluacion %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_evaluacion|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivo</dt>
+                        <dd class="col-md-9">{{ solicitud.motivo|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Condición actual</dt>
+                        <dd class="col-md-9">{{ solicitud.condicion_animal|cut:"_"|capfirst }}</dd>
+                        {% if solicitud.observacion %}
+                        <dt class="col-md-3">Observaciones</dt>
+                        <dd class="col-md-9">{{ solicitud.observacion|linebreaksbr }}</dd>
+                        {% endif %}
+                        <dt class="col-md-3">Requiere tratamiento</dt>
+                        <dd class="col-md-9">{% if solicitud.requiere_tratamiento %}Sí{% else %}No{% endif %}</dd>
+                    </dl>
+
+                    {% if solicitud.id_estado.nombre == "Registrada" %}
+                    {% if puede_gestionar_adopciones %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}#devolucion">
+                        {% csrf_token %}
+                        <input type="hidden" name="tipo_solicitud" value="devolucion">
+                        <input type="hidden" name="filtro_tipo" value="{{ filtro_tipo }}">
+                        <input type="hidden" name="filtro_estado" value="{{ estado_filtro }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ fecha_desde_filtro }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ fecha_hasta_filtro }}">
+                        <input type="hidden" name="devolucion_id" value="{{ solicitud.pk }}">
+                        <div class="d-flex flex-wrap gap-2 justify-content-end">
+                            <button class="btn btn-outline-danger" type="submit"
+                                    name="action" value="rechazada">
+                                <i class="bi bi-x-circle me-1" aria-hidden="true"></i>
+                                Rechazar
+                            </button>
+                            <button class="btn btn-success" type="submit"
+                                    name="action" value="aprobada">
+                                <i class="bi bi-check-circle me-1" aria-hidden="true"></i>
+                                Aprobar devolución
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo el personal activo puede responder esta solicitud.
+                    </p>
+                    {% endif %}
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                No hay solicitudes de devolución para los filtros seleccionados.
+            </p>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        {% if filtro_tipo == "hogar-temporal" %}
+        <section id="hogar-temporal" class="request-card p-3 p-md-4"
+                 aria-labelledby="foster-heading">
+            <div class="d-flex align-items-center gap-3 mb-3">
+                <span class="text-success fs-3" aria-hidden="true">
+                    <i class="bi bi-house-door"></i>
+                </span>
+                <div>
+                    <h2 class="h4 fw-bold mb-1" id="foster-heading">
+                        Solicitudes de hogar temporal
+                    </h2>
+                    <p class="text-secondary mb-0">
+                        Revisa los datos de la vivienda y responde cada postulación.
+                    </p>
+                </div>
+            </div>
+
+            {% if solicitudes_hogar_temporal %}
+            <div class="d-flex flex-column gap-3">
+                {% for solicitud in solicitudes_hogar_temporal %}
+                <article class="request-entry border rounded-3 p-3 p-md-4">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <h3 class="h5 fw-bold mb-1">
+                                {{ solicitud.id_casa.id_usuario.p_nombre }}
+                                {{ solicitud.id_casa.id_usuario.s_nombre }}
+                                {{ solicitud.id_casa.id_usuario.ap_paterno }}
+                                {{ solicitud.id_casa.id_usuario.ap_materno }}
+                            </h3>
+                            <span class="text-secondary">
+                                {{ solicitud.id_casa.id_usuario.correo|default:"Sin correo registrado" }}
+                            </span>
+                        </div>
+                        <div class="text-md-end">
+                            <span class="badge {% if solicitud.id_estado.nombre == 'Aprobada' %}text-bg-success{% elif solicitud.id_estado.nombre == 'Rechazada' %}text-bg-secondary{% else %}text-bg-warning{% endif %}">
+                                {{ solicitud.id_estado.nombre }}
+                            </span>
+                            <div class="small text-secondary mt-1">
+                                Recibida {{ solicitud.fecha_solicitud|date:"d/m/Y" }}
+                            </div>
+                            {% if solicitud.fecha_respuesta %}
+                            <div class="small text-secondary">
+                                Respondida {{ solicitud.fecha_respuesta|date:"d/m/Y" }}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <dl class="row mb-3">
+                        <dt class="col-md-3">Motivo</dt>
+                        <dd class="col-md-9">{{ solicitud.motivo|linebreaksbr }}</dd>
+                        <dt class="col-md-3">Domicilio</dt>
+                        <dd class="col-md-9">
+                            {{ solicitud.id_casa.calle }} {{ solicitud.id_casa.num_casa }},
+                            {{ solicitud.id_casa.poblacion }}
+                        </dd>
+                        <dt class="col-md-3">Características del hogar</dt>
+                        <dd class="col-md-9">
+                            {{ solicitud.id_casa.cant_persona }} personas ·
+                            {{ solicitud.id_casa.cant_habitacion }} habitaciones ·
+                            {{ solicitud.id_casa.metro_c }} m² ·
+                            {% if solicitud.id_casa.patio %}con patio{% else %}sin patio{% endif %}
+                        </dd>
+                        <dt class="col-md-3">Evidencia</dt>
+                        <dd class="col-md-9">{{ solicitud.id_casa.evidencia|urlize|linebreaksbr }}</dd>
+                        {% if solicitud.id_casa.observacion %}
+                        <dt class="col-md-3">Observaciones de vivienda</dt>
+                        <dd class="col-md-9">{{ solicitud.id_casa.observacion|linebreaksbr }}</dd>
+                        {% endif %}
+                        {% if solicitud.observacion %}
+                        <dt class="col-md-3">Respuesta del refugio</dt>
+                        <dd class="col-md-9">{{ solicitud.observacion|linebreaksbr }}</dd>
+                        {% endif %}
+                    </dl>
+
+                    {% if solicitud.id_estado.nombre == "Pendiente" or solicitud.id_estado.nombre == "En Revisión" %}
+                    {% if puede_gestionar_adopciones %}
+                    <form method="post" class="border-top pt-3"
+                          action="{% url 'gestion_solicitudes' %}#hogar-temporal">
+                        {% csrf_token %}
+                        <input type="hidden" name="tipo_solicitud" value="hogar_temporal">
+                        <input type="hidden" name="filtro_tipo" value="{{ filtro_tipo }}">
+                        <input type="hidden" name="filtro_estado" value="{{ estado_filtro }}">
+                        <input type="hidden" name="fecha_desde"
+                               value="{{ fecha_desde_filtro }}">
+                        <input type="hidden" name="fecha_hasta"
+                               value="{{ fecha_hasta_filtro }}">
+                        <input type="hidden" name="solicitud_hogar_id"
+                               value="{{ solicitud.id_solicitud_hog }}">
+                        <input type="hidden" name="hogar-fecha_desde"
+                               value="{{ filtro_fecha_hogar_form.fecha_desde.value|default:'' }}">
+                        <input type="hidden" name="hogar-fecha_hasta"
+                               value="{{ filtro_fecha_hogar_form.fecha_hasta.value|default:'' }}">
+                        <div class="mb-3">
+                            <label class="form-label"
+                                   for="respuesta-hogar-{{ solicitud.id_solicitud_hog }}">
+                                Respuesta para la persona solicitante
+                            </label>
+                            <textarea class="form-control"
+                                      name="respuesta"
+                                      id="respuesta-hogar-{{ solicitud.id_solicitud_hog }}"
+                                      rows="2"
+                                      maxlength="255"
+                                      placeholder="Respuesta opcional"></textarea>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 justify-content-end">
+                            <button class="btn btn-outline-danger" type="submit"
+                                    name="action" value="Rechazada">
+                                <i class="bi bi-x-circle me-1" aria-hidden="true"></i>
+                                Rechazar
+                            </button>
+                            <button class="btn btn-success" type="submit"
+                                    name="action" value="Aprobada">
+                                <i class="bi bi-check-circle me-1" aria-hidden="true"></i>
+                                Aprobar
+                            </button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="small text-secondary border-top pt-3 mb-0">
+                        Solo el personal activo puede responder esta solicitud.
+                    </p>
+                    {% endif %}
+                    {% elif solicitud.rut_personal %}
+                    <div class="small text-secondary border-top pt-3">
+                        Respondida por {{ solicitud.rut_personal.id_usuario.p_nombre }}
+                        {{ solicitud.rut_personal.id_usuario.ap_paterno }}
+                    </div>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0">
+                No hay solicitudes de hogar temporal para los filtros seleccionados.
+            </p>
+            {% endif %}
+        </section>
+        {% endif %}
+    </main>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            document.querySelectorAll("[data-staff-form]").forEach(function (form) {
+                const role = form.querySelector("[data-staff-role]");
+                const veterinarianFields = form.querySelector(
+                    "[data-veterinarian-fields]"
+                );
+                const specialty = form.querySelector('[name="especialidad"]');
+                const experience = form.querySelector('[name="experiencia"]');
+
+                function updateVeterinarianFields() {
+                    const isVeterinarian = role.value === "veterinario";
+                    veterinarianFields.hidden = !isVeterinarian;
+                    specialty.required = isVeterinarian;
+                    experience.required = isVeterinarian;
+                }
+
+                role.addEventListener("change", updateVeterinarianFields);
+                updateVeterinarianFields();
+            });
+        });
+    </script>
+{% endblock %}
