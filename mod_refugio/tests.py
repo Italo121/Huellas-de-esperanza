@@ -1967,12 +1967,12 @@ class RegistroUsuarioTests(SimpleTestCase):
             },
         )
 
-    def test_registration_accepts_latin_names_and_apostrophes(self):
+    def test_registration_accepts_latin_names_and_spaces(self):
         data = {
             "p_nombre": "José",
-            "s_nombre": "O'Connor",
+            "s_nombre": "María José",
             "ap_paterno": "Muñoz",
-            "ap_materno": "D’Amico",
+            "ap_materno": "De la Cruz",
             "correo": "jose@example.com",
             "genero": "masculino",
             "fecha_nacimiento": "1990-01-02",
@@ -1989,6 +1989,7 @@ class RegistroUsuarioTests(SimpleTestCase):
         for field_name, invalid_name in (
             ("p_nombre", "A1"),
             ("ap_paterno", "Pérez@"),
+            ("s_nombre", "O'Connor"),
             ("ap_paterno", "A"),
         ):
             with self.subTest(field=field_name, value=invalid_name):
@@ -2008,6 +2009,23 @@ class RegistroUsuarioTests(SimpleTestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("p_nombre", form.errors)
+
+    def test_registration_rejects_emails_without_valid_domains(self):
+        for email in ("ana@dominio", "ana@-example.com", "ana@example.c"):
+            with self.subTest(email=email):
+                data = self.request.POST.copy()
+                data["correo"] = email
+
+                form = RegistroUsuarioForm(data=data)
+
+                self.assertFalse(form.is_valid())
+                self.assertIn("correo", form.errors)
+
+    def test_phone_field_shows_nine_digit_example(self):
+        self.assertEqual(
+            RegistroUsuarioForm().fields["telefono"].widget.attrs["placeholder"],
+            "921875946",
+        )
 
     @patch("mod_refugio.views.supabase")
     @patch("mod_refugio.views.Usuario.objects.filter")

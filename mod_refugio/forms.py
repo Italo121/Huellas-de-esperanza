@@ -20,7 +20,7 @@ from .models import (
 
 MAX_ANIMAL_IMAGE_SIZE = 5 * 1024 * 1024
 ALLOWED_ANIMAL_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
-PERSON_NAME_PATTERN = re.compile(r"^[^\W\d_]+(?:[ '’][^\W\d_]+)*$", re.UNICODE)
+PERSON_NAME_PATTERN = re.compile(r"^[^\W\d_]+(?: [^\W\d_]+)*$", re.UNICODE)
 CHILEAN_RUT_PATTERN = re.compile(
     r"(?P<base>\d{7,8}|\d{1,2}(?:\.\d{3}){2})-?(?P<verifier>[\dKk])"
 )
@@ -141,12 +141,13 @@ class RegistroUsuarioForm(forms.Form):
                 "class": "form-control",
                 "type": "tel",
                 "autocomplete": "tel",
+                "placeholder": "Ejemplo : 921875946",
             }
         ),
         validators=[
             RegexValidator(
                 regex=r"^\+?[0-9]{7,20}$",
-                message="Ingresa un teléfono válido de hasta 20 dígitos.",
+                message="Ingresa un teléfono válido .",
             )
         ],
     )
